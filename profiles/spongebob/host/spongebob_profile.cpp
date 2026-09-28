@@ -7,8 +7,13 @@
 #include "psprecomp/runtime.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
+#include <iostream>
+#include <map>
+#include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace spongebob {
@@ -157,17 +162,6 @@ static constexpr ImportStub kOtherStubs[] = {
     {"sceUtility", 0x9A1C91D7u}, {"sceUtility", 0xA5DA2406u}, {"sceUtility", 0xD4B95FFBu}, {"sceUtility", 0xE49BFE92u},
     {"sceWlanDrv", 0xD7763699u},
     {"StdioForUser", 0x172D316Eu}, {"StdioForUser", 0xA6BAB2E9u}, {"StdioForUser", 0xF78BA90Au},
-    {"SysMemUserForUser", 0x13A5ABEFu}, {"SysMemUserForUser", 0x237DBD4Fu}, {"SysMemUserForUser", 0x91DE343Cu},
-    {"SysMemUserForUser", 0x9D9A5BA1u}, {"SysMemUserForUser", 0xA291F107u}, {"SysMemUserForUser", 0xB6D61D02u},
-    {"SysMemUserForUser", 0xF77D77CBu}, {"SysMemUserForUser", 0xF919F628u},
-    {"ThreadManForUser", 0x0DDCD2C9u}, {"ThreadManForUser", 0x1FB15A32u}, {"ThreadManForUser", 0x278C0DF5u},
-    {"ThreadManForUser", 0x293B45B8u}, {"ThreadManForUser", 0x369ED59Du}, {"ThreadManForUser", 0x402FCF22u},
-    {"ThreadManForUser", 0x446D8DE6u}, {"ThreadManForUser", 0x55C20A00u}, {"ThreadManForUser", 0x623AE665u},
-    {"ThreadManForUser", 0x68DA9E36u}, {"ThreadManForUser", 0x6B30100Fu}, {"ThreadManForUser", 0x809CE29Bu},
-    {"ThreadManForUser", 0x82BC5777u}, {"ThreadManForUser", 0x9FA03CD3u}, {"ThreadManForUser", 0xAA73C935u},
-    {"ThreadManForUser", 0xB011B11Fu}, {"ThreadManForUser", 0xB7D098C6u}, {"ThreadManForUser", 0xC07BB470u},
-    {"ThreadManForUser", 0xCEADEB47u}, {"ThreadManForUser", 0xE81CAF8Fu}, {"ThreadManForUser", 0xEDBA5844u},
-    {"ThreadManForUser", 0xEF9E4C70u}, {"ThreadManForUser", 0xF475845Du}, {"ThreadManForUser", 0xF8170FBEu},
     {"UtilsForUser", 0x27CC57F0u}, {"UtilsForUser", 0x3EE30821u}, {"UtilsForUser", 0x71EC4271u},
     {"UtilsForUser", 0x79D1C3FAu}, {"UtilsForUser", 0x91E4F6A7u},
 };
@@ -178,13 +172,273 @@ void register_other_stubs(psprecomp::Runtime &rt) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Fase A: minimal SysMem + ThreadMan HLE.
+// ---------------------------------------------------------------------------
+
+enum class ThreadState : std::uint8_t { Ready, Running, Waiting, Completed };
+
+struct ThreadRecord {
+    std::uint32_t uid{};
+    std::string name;
+    std::uint32_t entry{};
+    std::uint32_t stack_base{};
+    std::uint32_t stack_size{};
+    std::uint32_t kernel_context{};  // k0 (gpr[26]): thread control block, stack_top - 0x100.
+    psprecomp::AllegrexContext context{};
+    ThreadState state{ThreadState::Ready};
+    std::uint32_t exit_status{};
+};
+
+struct ThreadTable {
+    std::uint32_t current_uid{1u};              // uid 1 == module_start thread.
+    std::uint32_t next_uid{2u};
+    std::uint32_t next_stack_top{0x0A000000u};  // PSP user RAM top; stacks grow down.
+    std::map<std::uint32_t, ThreadRecord> threads;
+    std::vector<std::uint32_t> ready_queue;
+};
+
+ThreadTable thread_table{};
+
+struct PartitionBlock {
+    std::string name;
+    std::uint32_t address{};
+    std::uint32_t size{};
+};
+
+struct PartitionTable {
+    std::uint32_t next_uid{1u};
+    std::uint32_t next_address{0x09000000u};  // below the thread stacks; grows up.
+    std::map<std::uint32_t, PartitionBlock> blocks;
+};
+
+PartitionTable partition_table{};
+
+[[nodiscard]] std::uint64_t guest_time_us() {
+    using namespace std::chrono;
+    static const auto start = steady_clock::now();
+    return static_cast<std::uint64_t>(
+        duration_cast<microseconds>(steady_clock::now() - start).count());
+}
+
+std::uint32_t allocate_stack(std::uint32_t size) {
+    std::uint32_t aligned = (size + 0xFFu) & ~0xFFu;
+    if (aligned < 0x1000u) aligned = 0x1000u;
+    thread_table.next_stack_top -= aligned;
+    return thread_table.next_stack_top;  // stack base (bottom).
+}
+
+// Restore the next Ready thread's full context into `ctx` and switch the
+// runtime thread identity. Stops the runtime when no thread is left runnable.
+bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    while (!thread_table.ready_queue.empty()) {
+        const std::uint32_t uid = thread_table.ready_queue.front();
+        thread_table.ready_queue.erase(thread_table.ready_queue.begin());
+        const auto it = thread_table.threads.find(uid);
+        if (it == thread_table.threads.end() || it->second.state != ThreadState::Ready) continue;
+        ThreadRecord &record = it->second;
+        record.state = ThreadState::Running;
+        thread_table.current_uid = uid;
+        ctx = record.context;
+        psprecomp::set_runtime_thread_identity(static_cast<std::int32_t>(uid), record.name);
+        return true;
+    }
+    rt.stop("all PSP threads completed");
+    return false;
+}
+
+void complete_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    if (const auto it = thread_table.threads.find(thread_table.current_uid);
+        it != thread_table.threads.end()) {
+        it->second.state = ThreadState::Completed;
+        it->second.exit_status = ctx.gpr[4];  // a0 == exit status.
+    }
+    (void)activate_next_thread(rt, ctx);
+}
+
+void register_sysmem_hle(psprecomp::Runtime &rt) {
+    // 0x91DE343C (unknown) — no-op.
+    rt.register_hle("SysMemUserForUser", 0x91DE343Cu,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });
+    // sceKernelSetCompilerVersion — no-op.
+    rt.register_hle("SysMemUserForUser", 0xF77D77CBu,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });
+    // sceKernelMaxFreeMemSize.
+    rt.register_hle("SysMemUserForUser", 0xA291F107u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 8u * 1024u * 1024u); });
+    // sceKernelTotalFreeMemSize.
+    rt.register_hle("SysMemUserForUser", 0xF919F628u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 8u * 1024u * 1024u); });
+    // sceKernelAllocPartitionMemory — simple upward arena.
+    rt.register_hle("SysMemUserForUser", 0x237DBD4Fu,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const std::uint32_t size = ctx.gpr[7];  // a3.
+            const std::uint32_t aligned = (size + 0xFFu) & ~0xFFu;
+            if (aligned == 0u) { ctx.set_gpr(2, 0x800200D9u); return; }
+            PartitionBlock block{};
+            block.name = ctx.gpr[5] != 0u ? rt.memory().read_c_string(ctx.gpr[5], 128u) : "partition";
+            block.address = partition_table.next_address;
+            block.size = aligned;
+            partition_table.next_address += aligned;
+            const std::uint32_t uid = partition_table.next_uid++;
+            partition_table.blocks[uid] = std::move(block);
+            ctx.set_gpr(2, uid);
+        });
+    // sceKernelGetBlockHeadAddr.
+    rt.register_hle("SysMemUserForUser", 0x9D9A5BA1u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const auto it = partition_table.blocks.find(ctx.gpr[4]);
+            ctx.set_gpr(2, it != partition_table.blocks.end() ? it->second.address : 0u);
+        });
+    // sceKernelFreePartitionMemory.
+    rt.register_hle("SysMemUserForUser", 0xB6D61D02u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            partition_table.blocks.erase(ctx.gpr[4]);
+            ctx.set_gpr(2, 0u);
+        });
+    // sceKernelPrintf — minimal: print the format string, ignore varargs.
+    rt.register_hle("SysMemUserForUser", 0x13A5ABEFu,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            std::cout << rt.memory().read_c_string(ctx.gpr[4], 512u);
+            ctx.set_gpr(2, 0u);
+        });
+}
+
+void register_threadman_hle(psprecomp::Runtime &rt) {
+    // sceKernelGetThreadId.
+    rt.register_hle("ThreadManForUser", 0x293B45B8u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            ctx.set_gpr(2, thread_table.current_uid);
+        });
+    // sceKernelCreateThread.
+    rt.register_hle("ThreadManForUser", 0x446D8DE6u,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const std::uint32_t uid = thread_table.next_uid++;
+            const std::uint32_t stack_size = ctx.gpr[7];  // a3.
+            ThreadRecord record{};
+            record.uid = uid;
+            record.name = ctx.gpr[4] != 0u ? rt.memory().read_c_string(ctx.gpr[4], 128u) : "unnamed";
+            record.entry = ctx.gpr[5];        // a1.
+            record.stack_size = stack_size;
+            record.stack_base = allocate_stack(stack_size);
+            record.context = psprecomp::AllegrexContext{};
+            record.context.gpr[29] = record.stack_base + stack_size;  // sp == top.
+            record.context.gpr[28] = ctx.gpr[28];                     // inherit gp.
+            // k0 (gpr[26]) is the PSP thread control block. The guest stores its
+            // context pointer at [k0 + 4] and reads it back after the first
+            // cross-unit call, so give each thread its own 0x100-byte block just
+            // below the stack top (mirrors VCS: stack_top - 0x100).
+            record.kernel_context = record.stack_base + stack_size - 0x100u;
+            record.context.gpr[26] = record.kernel_context;
+            rt.memory().store32(record.kernel_context + 0xC0u, uid);
+            rt.memory().store32(record.kernel_context + 0xC8u, record.stack_base);
+            rt.memory().store32(record.kernel_context + 0xF8u, 0xFFFFFFFFu);
+            rt.memory().store32(record.kernel_context + 0xFCu, 0xFFFFFFFFu);
+            record.context.pc = record.entry;
+            record.state = ThreadState::Ready;
+            thread_table.threads[uid] = std::move(record);
+            ctx.set_gpr(2, uid);
+        });
+    // sceKernelStartThread — mark Ready and enqueue (the scheduler switches at
+    // the next blocking point, e.g. module_start's ExitThread).
+    rt.register_hle("ThreadManForUser", 0xF475845Du,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const auto it = thread_table.threads.find(ctx.gpr[4]);
+            if (it == thread_table.threads.end()) { ctx.set_gpr(2, 0x80020198u); return; }
+            it->second.state = ThreadState::Ready;
+            it->second.context.gpr[4] = ctx.gpr[5];  // arglen -> thread a0.
+            it->second.context.gpr[5] = ctx.gpr[6];  // argp   -> thread a1.
+            thread_table.ready_queue.push_back(it->second.uid);
+            ctx.set_gpr(2, 0u);
+        });
+    // sceKernelGetSystemTimeLow.
+    rt.register_hle("ThreadManForUser", 0x369ED59Du,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            ctx.set_gpr(2, static_cast<std::uint32_t>(guest_time_us()));
+        });
+    // sceKernelGetSystemTimeWide.
+    rt.register_hle("ThreadManForUser", 0x82BC5777u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const std::uint64_t us = guest_time_us();
+            ctx.set_gpr(2, static_cast<std::uint32_t>(us & 0xFFFFFFFFu));          // low.
+            ctx.set_gpr(3, static_cast<std::uint32_t>((us >> 32u) & 0xFFFFFFFFu)); // high.
+        });
+    // sceKernelDelayThread / sceKernelDelayThreadCB — mark Waiting and switch.
+    const auto delay_thread = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+        if (auto it = thread_table.threads.find(thread_table.current_uid);
+            it != thread_table.threads.end()) {
+            it->second.state = ThreadState::Waiting;
+        }
+        (void)activate_next_thread(rt, ctx);
+    };
+    rt.register_hle("ThreadManForUser", 0xCEADEB47u, delay_thread);
+    rt.register_hle("ThreadManForUser", 0x68DA9E36u, delay_thread);
+    // sceKernelWaitThreadEnd.
+    rt.register_hle("ThreadManForUser", 0x278C0DF5u,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const auto target = thread_table.threads.find(ctx.gpr[4]);
+            if (target == thread_table.threads.end()) { ctx.set_gpr(2, 0x80020198u); return; }
+            if (target->second.state == ThreadState::Completed) {
+                ctx.set_gpr(2, 0u);
+                return;
+            }
+            if (auto current = thread_table.threads.find(thread_table.current_uid);
+                current != thread_table.threads.end()) {
+                current->second.state = ThreadState::Waiting;
+            }
+            (void)activate_next_thread(rt, ctx);
+        });
+    // sceKernelExitThread (0xAA73C935) — complete and switch; does not return.
+    rt.register_hle("ThreadManForUser", 0xAA73C935u,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            complete_current_thread(rt, ctx);
+        });
+    // sceKernelExitDeleteThread — complete, remove, and switch.
+    rt.register_hle("ThreadManForUser", 0x809CE29Bu,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            if (const auto it = thread_table.threads.find(thread_table.current_uid);
+                it != thread_table.threads.end()) {
+                it->second.state = ThreadState::Completed;
+                it->second.exit_status = ctx.gpr[4];
+                thread_table.threads.erase(it);
+            }
+            (void)activate_next_thread(rt, ctx);
+        });
+
+    // Remaining ThreadManForUser imports reached during boot. UID-producing
+    // creators get an incrementing handle the guest can store and later delete;
+    // everything else is a no-op success.
+    static std::uint32_t next_callback_uid = 1u;
+    const auto return_uid = [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+        ctx.set_gpr(2, next_callback_uid++);
+    };
+    rt.register_hle("ThreadManForUser", 0xE81CAF8Fu, return_uid);  // sceKernelCreateCallback
+    rt.register_hle("ThreadManForUser", 0xC07BB470u, return_uid);  // sceKernelCreateFpl
+    rt.register_hle("ThreadManForUser", 0x55C20A00u, return_uid);  // sceKernelCreateEventFlag
+    for (const std::uint32_t nid : {0xEDBA5844u, 0x1FB15A32u, 0xEF9E4C70u, 0x402FCF22u,
+                                    0xF8170FBEu, 0x0DDCD2C9u, 0x623AE665u, 0x6B30100Fu,
+                                    0x9FA03CD3u, 0xB011B11Fu, 0xB7D098C6u}) {
+        rt.register_hle("ThreadManForUser", nid,
+            [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });
+    }
+}
+
 } // namespace
 
 void install_spongebob_profile(psprecomp::Runtime &rt) {
     register_sas_hle(rt);        // sceSasCore (27) — full software implementation.
     register_ge_hle(rt);         // sceGe_user (14).
     register_atrac3_stubs(rt);   // sceAtrac3plus (8) — stubs.
-    register_other_stubs(rt);    // everything else (IoFileMgrForUser, ThreadManForUser, ...).
+    register_sysmem_hle(rt);     // SysMemUserForUser (8) — Fase A.
+    register_threadman_hle(rt);  // ThreadManForUser (9) — Fase A.
+    register_other_stubs(rt);    // everything else (IoFileMgrForUser, ...).
+
+    // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
+    // syscall, syscall 0) jumps to guest address 0. Map it to the thread
+    // completion handler so the module_start thread can hand off to the worker
+    // thread it created via sceKernelStartThread (mirrors the VCS profile's
+    // `vcs_module_thread_return` registered at the same address).
+    rt.register_function(0x00000000u, &complete_current_thread, "psp_thread_return");
 }
 
 void spongebob_profile_tick(psprecomp::Runtime &rt) {

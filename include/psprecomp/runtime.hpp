@@ -201,6 +201,13 @@ public:
             explicit DepthGuard(std::uint32_t &value) : depth(value) { ++depth; }
             ~DepthGuard() { --depth; }
         } guard(chain_depth_);
+        // Materialize the exact guest target before entering the unit. The dense
+        // entry-table layout resolves the first dispatch from `direct_entry_id`,
+        // but units whose entry labels are too sparse fall back to a
+        // `switch (local_pc)` over the full guest PC, which reads ctx.pc. Keep
+        // the store here (rather than in every generated caller) so both entry
+        // layouts see the correct PC without dirtying the per-call hot path.
+        if constexpr (DirectTargetPc != 0u) ctx.pc = DirectTargetPc;
         if constexpr (DirectEntryId != 0u &&
                       std::is_invocable_v<decltype(Function), Runtime &, AllegrexContext &, std::uint16_t,
                                           GuestMemory::AotFastView &>) {
