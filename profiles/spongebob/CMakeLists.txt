@@ -2,10 +2,6 @@
 #
 # Linux/Vulkan build. The renderer, SDL platform layer and SAS audio are adapted
 # from elmasas/lcs-recomp (MIT). Opción A: no FFmpeg — sceAtrac3plus is stubbed.
-#
-# TODO(Fase 5): add host/main.cpp and host/spongebob_profile.cpp (game HLE),
-# populate generated/ (AOT corpus) and configs/nids.csv (sceGe_user, sceSasCore,
-# sceAtrac3plus NIDs). Until then this target does not link (no main()).
 
 set(SPONGEBOB_PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -14,6 +10,7 @@ set(SPONGEBOB_PROFILE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(SPONGEBOB_HOST_SOURCES
     host/main.cpp
     host/spongebob_profile.cpp
+    host/spongebob_profile.hpp
     host/ge_gpu_backend_vulkan.cpp
     host/ge_renderer.cpp
     host/display_window_sdl.cpp

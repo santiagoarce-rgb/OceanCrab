@@ -1056,7 +1056,7 @@ std::string emit_function_source(const GeneratedFunctionInput &function,
                         if (target_is_import) {
                             body << "    ctx.pc = " << psprecomp::hex32(target) << "u;\n"
                                  << "    return;\n";
-                            continue;
+                            break;
                         }
                         // Otherwise run the callee inline and resume locally only
                         // if it came back to our return address.
@@ -1226,7 +1226,10 @@ int generate_manual(const std::filesystem::path &elf_path,
 // readable helper form used by their source-level tests.
 std::string lower_constant_gpr_writes(std::string text) {
     constexpr std::string_view needle = "ctx.set_gpr(";
+    std::string out;
+    out.reserve(text.size());
     std::size_t search = 0u;
+    std::size_t copied = 0u;
     while ((search = text.find(needle, search)) != std::string::npos) {
         const std::size_t open = search + needle.size() - 1u;
         std::size_t cursor = open + 1u;
@@ -1262,21 +1265,23 @@ std::string lower_constant_gpr_writes(std::string text) {
         while (first < last && std::isspace(static_cast<unsigned char>(text[first]))) ++first;
         while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1u]))) --last;
         const std::string expression = text.substr(first, last - first);
-        std::string replacement;
-        if (index == 0u) {
-            replacement = "(void)(" + expression + ")";
-        } else if (index < 32u) {
-            replacement = "ctx.gpr[" + std::to_string(index) + "] = (" + expression + ")";
-        } else {
+        if (index >= 32u) {
             // Defensive fallback.  Automatic Allegrex decoding should never emit
             // an out-of-range architectural GPR, but preserve validation if it does.
             search = close + 1u;
             continue;
         }
-        text.replace(search, close - search + 1u, replacement);
-        search += replacement.size();
+        out.append(text, copied, search - copied);
+        if (index == 0u) {
+            out += "(void)(" + expression + ")";
+        } else {
+            out += "ctx.gpr[" + std::to_string(index) + "] = (" + expression + ")";
+        }
+        copied = close + 1u;
+        search = copied;
     }
-    return text;
+    out.append(text, copied, std::string::npos);
+    return out;
 }
 
 std::string lower_aot_memory_accesses(std::string text) {
@@ -1310,7 +1315,10 @@ std::string lower_constant_fpr_accesses(std::string text) {
     text = std::move(lowered);
 
     constexpr std::string_view needle = "ctx.set_fpr_bits(";
+    std::string out;
+    out.reserve(text.size());
     std::size_t search = 0u;
+    std::size_t copied = 0u;
     while ((search = text.find(needle, search)) != std::string::npos) {
         std::size_t cursor = search + needle.size();
         while (cursor < text.size() && std::isspace(static_cast<unsigned char>(text[cursor]))) ++cursor;
@@ -1342,12 +1350,13 @@ std::string lower_constant_fpr_accesses(std::string text) {
         while (first < last && std::isspace(static_cast<unsigned char>(text[first]))) ++first;
         while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1u]))) --last;
         const std::string expression = text.substr(first, last - first);
-        const std::string replacement = "ctx.fpr[" + std::to_string(index) +
-            "] = std::bit_cast<float>(" + expression + ")";
-        text.replace(search, close - search + 1u, replacement);
-        search += replacement.size();
+        out.append(text, copied, search - copied);
+        out += "ctx.fpr[" + std::to_string(index) + "] = std::bit_cast<float>(" + expression + ")";
+        copied = close + 1u;
+        search = copied;
     }
-    return text;
+    out.append(text, copied, std::string::npos);
+    return out;
 }
 
 // VFPU operands in automatic AOT are encoded literals. Convert the

@@ -1,3 +1,4 @@
+#include "spongebob_profile.hpp"
 #include "spongebob_sas.hpp"
 #include "ge_renderer.hpp"
 
