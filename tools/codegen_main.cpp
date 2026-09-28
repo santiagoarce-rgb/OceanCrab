@@ -434,10 +434,10 @@ std::string emit_regular(const psprecomp::DecodedInstruction &d, std::uint32_t p
         break;
     }
     case psprecomp::OpcodeKind::Mtv:
-        out << "    ctx.set_vfpu_scalar_bits(" << (d.word & 0xFFu) << "u, " << reg(d.rt) << ");\n";
+        out << "    ctx.set_vfpu_scalar_bits(" << (d.word & 0x7Fu) << "u, " << reg(d.rt) << ");\n";
         break;
     case psprecomp::OpcodeKind::Mfv:
-        out << "    ctx.set_gpr(" << d.rt << ", ctx.vfpu_scalar_bits(" << (d.word & 0xFFu) << "u));\n";
+        out << "    ctx.set_gpr(" << d.rt << ", ctx.vfpu_scalar_bits(" << (d.word & 0x7Fu) << "u));\n";
         break;
     case psprecomp::OpcodeKind::VmidT: {
         const std::uint32_t size_code = ((d.word >> 7u) & 1u) | (((d.word >> 15u) & 1u) << 1u);
@@ -876,7 +876,8 @@ void emit_target(std::ostringstream &body, std::uint32_t target,
     // chain table and indexes the tiny unit table instead. A bucket containing
     // an import/HLE/host replacement is marked overridden at registration time
     // and invoke_chained_unit() falls back to the exact per-PC lookup there.
-    if (unit_span_bytes != 0u && target >= executable_base) {
+    if (unit_span_bytes != 0u && target >= executable_base &&
+        direct_entry_ids != nullptr && direct_entry_ids->contains(target)) {
         const std::uint32_t unit = (target - executable_base) / unit_span_bytes;
         body << indent << "(void)" << direct_unit_chain_expression(unit, target, direct_entry_ids)
              << "; return;\n";
@@ -968,8 +969,10 @@ std::string emit_function_source(const GeneratedFunctionInput &function,
              << "    (void)direct_entry_id;\n"
              << "    std::uint32_t jump_target = 0u;\n"
              << "    std::uint32_t local_transfers = 0u;\n"
+             << "    std::uint32_t local_pc = ctx.pc;\n"
+             << "    std::uint32_t entry_id = 0u;\n"
              << "LOCAL_DISPATCH:\n"
-             << "    switch (ctx.pc) {\n";
+             << "    switch (local_pc) {\n";
         for (const auto label : function.entry_labels) {
             body << "    case " << psprecomp::hex32(label) << "u: goto L_"
                  << psprecomp::hex32(label).substr(2) << ";\n";
@@ -1061,7 +1064,9 @@ std::string emit_function_source(const GeneratedFunctionInput &function,
                         // Otherwise run the callee inline and resume locally only
                         // if it came back to our return address.
                         const bool direct_unit = function.unit_span_bytes != 0u &&
-                            target >= function.executable_base;
+                            target >= function.executable_base &&
+                            function.direct_entry_ids != nullptr &&
+                            function.direct_entry_ids->contains(target);
                         const std::uint32_t target_unit = direct_unit
                             ? (target - function.executable_base) / function.unit_span_bytes : 0u;
                         if (!direct_unit)

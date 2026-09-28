@@ -118,6 +118,10 @@ int main(int argc, char **argv) {
         runtime.cpu().set_gpr(31, 0u);   // ra
         runtime.cpu().set_gpr(4, 0u);    // a0
         runtime.cpu().set_gpr(5, 0u);    // a1
+        // Establish the loader/module stack at the top of user RAM (mirrors VCS
+        // install_profile(); the SpongeBob HLE stubs do not create a thread yet).
+        runtime.cpu().set_gpr(26, 0x09FFFF00u);   // k0: kernel context
+        runtime.cpu().set_gpr(29, 0x09FFFF00u);   // sp: loader stack
 
         std::cout << "SpongeBobNative PSP bootstrap\n"
                   << "Executable: " << paths.eboot.string() << "\n"
