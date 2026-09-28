@@ -188,6 +188,7 @@ struct ThreadRecord {
     psprecomp::AllegrexContext context{};
     ThreadState state{ThreadState::Ready};
     std::uint32_t exit_status{};
+    std::uint64_t wake_at_us{};  // 0 == not waiting; else virtual-time wake deadline.
 };
 
 struct ThreadTable {
@@ -214,11 +215,42 @@ struct PartitionTable {
 
 PartitionTable partition_table{};
 
+// Execution-driven virtual time (mirrors VCS's virtual_time_us). Advanced by the
+// runtime starvation hook and jumped directly to the next wakeup deadline when
+// the scheduler would otherwise idle.
+std::uint64_t virtual_time_us{};
+
+constexpr std::uint64_t kVblankPeriodUs = 16683u;       // ~59.94 Hz PSP refresh.
+constexpr std::uint64_t kTickMicroseconds = 64u;        // virtual time per starvation tick.
+constexpr std::uint64_t kTickDispatchInterval = 256u;   // dispatches between ticks.
+
+struct DisplayState {
+    std::uint32_t mode{0u};
+    std::uint32_t width{480u};
+    std::uint32_t height{272u};
+    std::uint32_t frame_buffer{0u};
+    std::uint32_t buffer_width{512u};
+    std::uint32_t pixel_format{3u};
+};
+
+DisplayState display_state{};
+
 [[nodiscard]] std::uint64_t guest_time_us() {
     using namespace std::chrono;
     static const auto start = steady_clock::now();
     return static_cast<std::uint64_t>(
         duration_cast<microseconds>(steady_clock::now() - start).count());
+}
+
+// Advance virtual time by the real elapsed microseconds since the last poll and
+// return the new value. Guest code that spins on sceKernelGetSystemTime* without
+// dispatching enough to trip the starvation hook still sees the clock move.
+std::uint64_t advance_system_time() {
+    static std::uint64_t last_wall_us = 0u;
+    const std::uint64_t now = guest_time_us();
+    if (now > last_wall_us) virtual_time_us += now - last_wall_us;
+    last_wall_us = now;
+    return virtual_time_us;
 }
 
 std::uint32_t allocate_stack(std::uint32_t size) {
@@ -228,9 +260,39 @@ std::uint32_t allocate_stack(std::uint32_t size) {
     return thread_table.next_stack_top;  // stack base (bottom).
 }
 
+// Wake any Waiting thread whose virtual-time deadline has passed.
+void promote_expired_delays() {
+    for (auto &[uid, record] : thread_table.threads) {
+        if (record.state == ThreadState::Waiting && record.wake_at_us != 0u &&
+            record.wake_at_us <= virtual_time_us) {
+            record.state = ThreadState::Ready;
+            record.wake_at_us = 0u;
+            thread_table.ready_queue.push_back(uid);
+        }
+    }
+}
+
 // Restore the next Ready thread's full context into `ctx` and switch the
 // runtime thread identity. Stops the runtime when no thread is left runnable.
 bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    promote_expired_delays();
+    // Nothing runnable: jump virtual time straight to the earliest wakeup
+    // deadline so a VBlank/delay waiter comes due (mirrors VCS's idle path).
+    while (thread_table.ready_queue.empty()) {
+        std::uint64_t earliest = ~std::uint64_t{0};
+        for (const auto &[uid, record] : thread_table.threads) {
+            (void)uid;
+            if (record.state == ThreadState::Waiting && record.wake_at_us != 0u &&
+                record.wake_at_us < earliest)
+                earliest = record.wake_at_us;
+        }
+        if (earliest == ~std::uint64_t{0}) {
+            rt.stop("all PSP threads completed");
+            return false;
+        }
+        if (earliest > virtual_time_us) virtual_time_us = earliest;
+        promote_expired_delays();
+    }
     while (!thread_table.ready_queue.empty()) {
         const std::uint32_t uid = thread_table.ready_queue.front();
         thread_table.ready_queue.erase(thread_table.ready_queue.begin());
@@ -252,6 +314,23 @@ void complete_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext 
         it != thread_table.threads.end()) {
         it->second.state = ThreadState::Completed;
         it->second.exit_status = ctx.gpr[4];  // a0 == exit status.
+    }
+    (void)activate_next_thread(rt, ctx);
+}
+
+// Park the current thread until `wake_at_us` of virtual time. Saves the
+// suspended context (resuming at $ra, like VCS's make_wait_context) so the
+// thread continues after the HLE call once its deadline expires.
+void suspend_for_wakeup(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx,
+                        std::uint64_t wake_at_us) {
+    if (const auto it = thread_table.threads.find(thread_table.current_uid);
+        it != thread_table.threads.end()) {
+        ThreadRecord &record = it->second;
+        record.context = ctx;
+        record.context.pc = ctx.gpr[31];  // resume after the HLE call.
+        record.context.set_gpr(2, 0u);    // return value.
+        record.state = ThreadState::Waiting;
+        record.wake_at_us = wake_at_us;
     }
     (void)activate_next_thread(rt, ctx);
 }
@@ -354,22 +433,20 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     // sceKernelGetSystemTimeLow.
     rt.register_hle("ThreadManForUser", 0x369ED59Du,
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
-            ctx.set_gpr(2, static_cast<std::uint32_t>(guest_time_us()));
+            ctx.set_gpr(2, static_cast<std::uint32_t>(advance_system_time()));
         });
     // sceKernelGetSystemTimeWide.
     rt.register_hle("ThreadManForUser", 0x82BC5777u,
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
-            const std::uint64_t us = guest_time_us();
+            const std::uint64_t us = advance_system_time();
             ctx.set_gpr(2, static_cast<std::uint32_t>(us & 0xFFFFFFFFu));          // low.
             ctx.set_gpr(3, static_cast<std::uint32_t>((us >> 32u) & 0xFFFFFFFFu)); // high.
         });
     // sceKernelDelayThread / sceKernelDelayThreadCB — mark Waiting and switch.
     const auto delay_thread = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
-        if (auto it = thread_table.threads.find(thread_table.current_uid);
-            it != thread_table.threads.end()) {
-            it->second.state = ThreadState::Waiting;
-        }
-        (void)activate_next_thread(rt, ctx);
+        // a0 == delay in microseconds.
+        suspend_for_wakeup(rt, ctx,
+                           virtual_time_us + static_cast<std::uint64_t>(ctx.gpr[4]));
     };
     rt.register_hle("ThreadManForUser", 0xCEADEB47u, delay_thread);
     rt.register_hle("ThreadManForUser", 0x68DA9E36u, delay_thread);
@@ -423,6 +500,47 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     }
 }
 
+void register_display_hle(psprecomp::Runtime &rt) {
+    // sceDisplayWaitVblank* — park the caller until the next virtual VBlank.
+    const auto wait_vblank = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+        const std::uint64_t phase = virtual_time_us % kVblankPeriodUs;
+        suspend_for_wakeup(rt, ctx, virtual_time_us + (kVblankPeriodUs - phase));
+    };
+
+    rt.register_hle("sceDisplay", 0x0E20F177u,  // sceDisplaySetMode
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            display_state.mode = ctx.gpr[4];
+            display_state.width = ctx.gpr[5];
+            display_state.height = ctx.gpr[6];
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceDisplay", 0xDEA197D4u,  // sceDisplayGetMode
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            if (ctx.gpr[4] != 0u) rt.memory().store32(ctx.gpr[4], display_state.mode);
+            if (ctx.gpr[5] != 0u) rt.memory().store32(ctx.gpr[5], display_state.width);
+            if (ctx.gpr[6] != 0u) rt.memory().store32(ctx.gpr[6], display_state.height);
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceDisplay", 0x289D82FEu,  // sceDisplaySetFrameBuf
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            display_state.frame_buffer = ctx.gpr[4];
+            display_state.buffer_width = ctx.gpr[5];
+            display_state.pixel_format = ctx.gpr[6];
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceDisplay", 0xEEDA2E54u,  // sceDisplayGetFrameBuf
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            if (ctx.gpr[4] != 0u) rt.memory().store32(ctx.gpr[4], display_state.frame_buffer);
+            if (ctx.gpr[5] != 0u) rt.memory().store32(ctx.gpr[5], display_state.buffer_width);
+            if (ctx.gpr[6] != 0u) rt.memory().store32(ctx.gpr[6], display_state.pixel_format);
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceDisplay", 0x984C27E7u, wait_vblank);  // sceDisplayWaitVblankStart
+    rt.register_hle("sceDisplay", 0x46F186C3u, wait_vblank);  // sceDisplayWaitVblankStartCB
+    rt.register_hle("sceDisplay", 0x36CDFADEu, wait_vblank);  // sceDisplayWaitVblank
+    rt.register_hle("sceDisplay", 0x8EB9EC49u, wait_vblank);  // sceDisplayWaitVblankCB
+}
+
 } // namespace
 
 void install_spongebob_profile(psprecomp::Runtime &rt) {
@@ -431,6 +549,7 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
     register_atrac3_stubs(rt);   // sceAtrac3plus (8) — stubs.
     register_sysmem_hle(rt);     // SysMemUserForUser (8) — Fase A.
     register_threadman_hle(rt);  // ThreadManForUser (9) — Fase A.
+    register_display_hle(rt);    // sceDisplay (8) — Fase B (VBlank + framebuffer).
     register_other_stubs(rt);    // everything else (IoFileMgrForUser, ...).
 
     // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
@@ -439,6 +558,17 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
     // thread it created via sceKernelStartThread (mirrors the VCS profile's
     // `vcs_module_thread_return` registered at the same address).
     rt.register_function(0x00000000u, &complete_current_thread, "psp_thread_return");
+
+    // Fase B: execution-driven virtual time. The starvation hook advances the
+    // clock every N dispatches and promotes expired VBlank/delay waiters; the
+    // scheduler idle path (activate_next_thread) jumps straight to the next
+    // wakeup deadline when nothing is runnable.
+    psprecomp::set_runtime_starvation_hook(
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &) {
+            virtual_time_us += kTickMicroseconds;
+            promote_expired_delays();
+        },
+        kTickDispatchInterval);
 }
 
 void spongebob_profile_tick(psprecomp::Runtime &rt) {
