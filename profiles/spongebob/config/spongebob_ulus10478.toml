@@ -1,0 +1,24 @@
+[game]
+name = "SpongeBob's Truth or Square"
+disc_id = "ULUS-10478"
+region = "NTSC-U"
+module = "pspdev"
+ram_mb = 32
+load_base = "0x08804000"
+expected_sha256 = "89339ba4b9bdaf22eb670c60a03c57313809fcfd8b293d221cd69e1c7972f4aa"
+
+[input]
+executable = "original/ULUS10478_EBOOT.ELF"
+game_root = "original/PSP_GAME/USRDIR"
+functions_csv = "analysis/ULUS10478_report_function_seeds.csv"
+nids_csv = "../../../configs/nids.csv"
+
+[output]
+report_json = "analysis/ULUS10478_report.json"
+generated_cpp = "generated/generated_manifest.cpp"
+
+[policy]
+missing_function = "warn"
+unsupported_instruction = "warn"
+allow_interpreter_fallback = true
+allow_jit_fallback = false

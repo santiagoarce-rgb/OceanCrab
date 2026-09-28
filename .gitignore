@@ -1,0 +1,43 @@
+# Build outputs
+out/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# User-provided game files (copyright)
+profiles/*/original/
+*.iso
+*.cso
+*.CSO
+*.ELF
+EBOOT.BIN
+EBOOT.ELF
+*.at3
+*.pmf
+
+# Legacy profiles (not part of OceanCrab)
+profiles/vcs/
+profiles/lcs/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary
+/tmp/
+tmp/
+
+# Git backup (not for GitHub)
+.git.backup-*
