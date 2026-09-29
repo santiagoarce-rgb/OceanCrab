@@ -226,3 +226,30 @@ en `0x08A09B4C` — siguiente fase: audio (Fase E, sceSasCore/sceAudio ya semi-h
 ### Próximo paso
 1. Investigar `0x0892802C`: añadir como seed en `functions.csv` y regenerar el
    corpus AOT (o ver si es un salto computado que el análisis perdió).
+
+## Sesión 2026-09-29 (6) — detección de jump tables / funciones tras salto
+
+### Causa raíz del gap de codegen
+`0x0892802C` era una entrada de **jump table** (`j 0x0891C8D4`, precedida de otro
+salto). El análisis (`collect_initial_seeds` en `program_analysis.cpp`) solo
+sembraba targets de `jal` y punteros R_MIPS_32 relocados — NO detectaba entradas
+de jump table ni funciones alcanzadas por salto computado (`jr $reg`).
+
+### Fix (reusable en el framework)
+En `collect_initial_seeds`:
+1. Sembrar también targets de `j` (tail calls) — `direct_j_target`.
+2. Sembrar la **dirección** de cualquier instrucción inmediatamente después de un
+   salto sin enlace (`j`/`jr`, con su delay slot) — `after_jump_entry`. Cubre:
+   - entradas de jump table (`j`/`jal` consecutivos);
+   - funciones alcanzadas por puntero/computed jump (prólogo `addiu $sp,...` tras
+     `jr $ra`).
+
+### Resultado
+- `0x0892802C` y `0x08828268` ahora están en el corpus (units 0009/0001).
+- El juego avanza más allá de cada gap (719 frames), pero van apareciendo más
+  gaps de salto computado — el fix general los cubre en una sola pasada de
+  regeneración.
+
+### Nota
+Regenerar el corpus + recompilar las 20 units lleva ~1 h (units de ~3.4 MB con
+-O2). Es un costo único por cambio en `program_analysis.cpp`.

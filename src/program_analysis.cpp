@@ -297,8 +297,21 @@ std::map<std::uint32_t, std::string> collect_initial_seeds(const Elf32Image &elf
     for (const auto &range : ranges) {
         for (std::uint32_t pc = range.start; pc + 4u <= range.end; pc += 4u) {
             const auto decoded = decode_allegrex(memory.load32(pc));
-            if (decoded.kind != OpcodeKind::Jal) continue;
-            add_seed(seeds, ranges, direct_jump_target(pc, decoded), "direct_jal_target");
+            if (decoded.kind == OpcodeKind::Jal) {
+                add_seed(seeds, ranges, direct_jump_target(pc, decoded), "direct_jal_target");
+            } else if (decoded.kind == OpcodeKind::J) {
+                add_seed(seeds, ranges, direct_jump_target(pc, decoded), "direct_j_target");
+            }
+            // Any instruction immediately after an unconditional, non-linking
+            // jump (j or jr, with its delay slot) is unreachable via fall-through:
+            // it is a jump-table entry or a function reached through a pointer /
+            // computed jump. Seed its own address as a function entry.
+            if (pc >= range.start + 8u) {
+                const auto prev = decode_allegrex(memory.load32(pc - 8u));
+                if (prev.kind == OpcodeKind::J || prev.kind == OpcodeKind::Jr) {
+                    add_seed(seeds, ranges, pc, "after_jump_entry");
+                }
+            }
         }
     }
     collect_materialized_code_pointers(memory, ranges, seeds);
