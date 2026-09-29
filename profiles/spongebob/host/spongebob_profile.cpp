@@ -9,6 +9,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <string>
@@ -56,6 +57,20 @@ GeListTable ge_list_table{};
 constexpr std::uint32_t kEdramBase = 0x04000000u;  // PSP VRAM base.
 constexpr std::uint32_t kEdramSize = 0x00200000u;  // 2 MB.
 
+// Instrumentation counters (diagnostics): how often the guest drives the GE and
+// display, and whether it is actually presenting frames or spinning in place.
+std::uint64_t ge_enqueue_count{};
+std::uint64_t ge_list_sync_count{};
+std::uint64_t ge_draw_sync_count{};
+std::uint64_t frame_present_count{};
+std::uint64_t vblank_wait_count{};
+std::uint32_t last_frame_buffer{0u};
+bool has_last_frame_buffer{false};
+std::uint64_t starvation_tick_total{};
+std::uint32_t busywait_tracked_pc{0u};
+std::uint64_t busywait_same_pc_count{0u};
+std::uint64_t frame_report_ticks{0u};
+
 // Generic HLE stub: returns 0 in v0.
 void register_generic_stub(psprecomp::Runtime &rt, const char *library, std::uint32_t nid) {
     rt.register_hle(library, nid, [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
@@ -79,6 +94,9 @@ void ge_list_enqueue(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
     const std::uint32_t list_address = ctx.gpr[4];
     const std::uint32_t stall_address = ctx.gpr[5];
     const std::uint32_t callback_id = ctx.gpr[6];
+    ++ge_enqueue_count;
+    std::cerr << "[ge] enqueue list=" << psprecomp::hex32(list_address)
+              << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
     GeListRecord record{};
     record.guest_id = ge_list_table.next_raw_id++;
     record.list_address = list_address;
@@ -93,8 +111,19 @@ void ge_list_enqueue(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
 
 void ge_list_sync(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
     const std::uint32_t list_id = ctx.gpr[4];
+    ++ge_list_sync_count;
+    std::cerr << "[ge] sync list=" << psprecomp::hex32(list_id)
+              << " count=" << ge_list_sync_count
+              << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
     const auto it = ge_list_table.lists.find(list_id);
     if (it != ge_list_table.lists.end()) it->second.state = GeListState::Completed;
+    ctx.set_gpr(2, 0u);
+}
+
+void ge_draw_sync(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+    ++ge_draw_sync_count;
+    std::cerr << "[ge] draw_sync count=" << ge_draw_sync_count
+              << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
     ctx.set_gpr(2, 0u);
 }
 
@@ -106,7 +135,7 @@ void register_ge_hle(psprecomp::Runtime &rt) {
     rt.register_hle("sceGe_user", 0x1C0D95A6u, ge_list_enqueue);  // sceGeListEnQueueHead
     rt.register_hle("sceGe_user", 0xE0D68148u, [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });          // sceGeListUpdateStallAddr
     rt.register_hle("sceGe_user", 0x03444EB4u, ge_list_sync);     // sceGeListSync
-    rt.register_hle("sceGe_user", 0xB287BD61u, [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });          // sceGeDrawSync
+    rt.register_hle("sceGe_user", 0xB287BD61u, ge_draw_sync);     // sceGeDrawSync
     rt.register_hle("sceGe_user", 0x4C06E472u, [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });          // sceGeContinue
     rt.register_hle("sceGe_user", 0xA4FC06A4u, [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });          // sceGeSetCallback
     rt.register_hle("sceGe_user", 0x05DB22CEu, [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });          // sceGeUnsetCallback
@@ -233,6 +262,18 @@ std::uint64_t virtual_time_us{};
 constexpr std::uint64_t kVblankPeriodUs = 16683u;       // ~59.94 Hz PSP refresh.
 constexpr std::uint64_t kTickMicroseconds = 64u;        // virtual time per starvation tick.
 constexpr std::uint64_t kTickDispatchInterval = 256u;   // dispatches between ticks.
+
+// Consecutive same-PC starvation ticks before the spin detector forces a
+// cooperative yield (default 4 ticks ~= 1024 dispatches). Overridable at runtime
+// via PSPRECOMP_SPIN_YIELD_TICKS so it can be tuned without rebuilding.
+const std::uint64_t kSpinYieldTicks = []() {
+    const char *env = std::getenv("PSPRECOMP_SPIN_YIELD_TICKS");
+    if (env == nullptr || *env == '\0') return std::uint64_t{4};
+    char *end = nullptr;
+    const unsigned long long value = std::strtoull(env, &end, 0);
+    return (end != nullptr && *end == '\0') ? static_cast<std::uint64_t>(value)
+                                            : std::uint64_t{4};
+}();
 
 struct DisplayState {
     std::uint32_t mode{0u};
@@ -561,6 +602,11 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
 void register_display_hle(psprecomp::Runtime &rt) {
     // sceDisplayWaitVblank* — park the caller until the next virtual VBlank.
     const auto wait_vblank = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+        ++vblank_wait_count;
+        if (vblank_wait_count % 100u == 0u) {
+            std::cerr << "[display] wait_vblank count=" << vblank_wait_count
+                      << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+        }
         const std::uint64_t phase = virtual_time_us % kVblankPeriodUs;
         suspend_for_wakeup(rt, ctx, virtual_time_us + (kVblankPeriodUs - phase));
     };
@@ -581,9 +627,18 @@ void register_display_hle(psprecomp::Runtime &rt) {
         });
     rt.register_hle("sceDisplay", 0x289D82FEu,  // sceDisplaySetFrameBuf
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
-            display_state.frame_buffer = ctx.gpr[4];
+            const std::uint32_t framebuf = ctx.gpr[4];
+            display_state.frame_buffer = framebuf;
             display_state.buffer_width = ctx.gpr[5];
             display_state.pixel_format = ctx.gpr[6];
+            if (!has_last_frame_buffer || framebuf != last_frame_buffer) {
+                if (has_last_frame_buffer) ++frame_present_count;  // a new buffer was presented
+                last_frame_buffer = framebuf;
+                has_last_frame_buffer = true;
+            }
+            std::cerr << "[display] framebuf=" << psprecomp::hex32(framebuf)
+                      << " width=" << ctx.gpr[5]
+                      << " height=" << display_state.height << "\n";
             ctx.set_gpr(2, 0u);
         });
     rt.register_hle("sceDisplay", 0xEEDA2E54u,  // sceDisplayGetFrameBuf
@@ -597,6 +652,27 @@ void register_display_hle(psprecomp::Runtime &rt) {
     rt.register_hle("sceDisplay", 0x46F186C3u, wait_vblank);  // sceDisplayWaitVblankStartCB
     rt.register_hle("sceDisplay", 0x36CDFADEu, wait_vblank);  // sceDisplayWaitVblank
     rt.register_hle("sceDisplay", 0x8EB9EC49u, wait_vblank);  // sceDisplayWaitVblankCB
+}
+
+// TAREA 4 diagnostics: log the first entry to the three hot main-loop PCs so we
+// can see which generated unit (or import stub) each one belongs to.
+void log_main_loop_entries(psprecomp::Runtime &, psprecomp::AllegrexContext &,
+                           std::uint32_t dispatch_pc, std::int32_t) {
+    struct Watch { std::uint32_t pc; const char *name; };
+    static const Watch kWatch[] = {
+        {0x08971930u, "recomp_unit_0011"},
+        {0x08A2C448u, "import_29 (sceSasCore::0xA3589D81)"},
+        {0x08A08EBCu, "recomp_unit_0016"},
+    };
+    static bool reported[3] = {false, false, false};
+    for (std::size_t i = 0u; i < 3u; ++i) {
+        if (dispatch_pc == kWatch[i].pc && !reported[i]) {
+            reported[i] = true;
+            std::cerr << "[mainloop] enter pc=" << psprecomp::hex32(dispatch_pc)
+                      << " unit=" << kWatch[i].name << "\n";
+            break;
+        }
+    }
 }
 
 } // namespace
@@ -622,11 +698,47 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
     // scheduler idle path (activate_next_thread) jumps straight to the next
     // wakeup deadline when nothing is runnable.
     psprecomp::set_runtime_starvation_hook(
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &) {
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
             virtual_time_us += kTickMicroseconds;
             promote_expired_delays();
+
+            // Spin detector: a PC that never advances across consecutive ticks is
+            // a cooperative busy-wait.  Each tick covers kTickDispatchInterval
+            // dispatches, so kSpinYieldTicks ticks ~= kSpinYieldTicks*256
+            // dispatches stuck on one PC.  Forcing a yield here (the analogue of
+            // the Wii "blr yield") lets the ready worker thread run and flip the
+            // flag the spinner is waiting on.
+            ++starvation_tick_total;
+            if (ctx.pc == busywait_tracked_pc) {
+                ++busywait_same_pc_count;
+            } else {
+                busywait_tracked_pc = ctx.pc;
+                busywait_same_pc_count = 1u;
+            }
+            if (busywait_same_pc_count == kSpinYieldTicks) {
+                busywait_same_pc_count = 0u;
+                static std::uint64_t spin_yield_count = 0u;
+                ++spin_yield_count;
+                if (spin_yield_count <= 5u || (spin_yield_count % 1000u) == 0u) {
+                    std::cerr << "[spin-yield] #" << spin_yield_count
+                              << " pc=" << psprecomp::hex32(ctx.pc)
+                              << " dispatch=" << (starvation_tick_total * kTickDispatchInterval) << "\n";
+                }
+                (void)activate_next_thread(rt, ctx);
+            }
+
+            // Frame summary every ~100k dispatches (~390 ticks).
+            if (++frame_report_ticks % 390u == 0u) {
+                std::cerr << "[frame] frames=" << frame_present_count
+                          << " enqueues=" << ge_enqueue_count
+                          << " draws=" << ge_draw_sync_count
+                          << " fb=" << psprecomp::hex32(last_frame_buffer) << "\n";
+            }
         },
         kTickDispatchInterval);
+
+    // TAREA 4 diagnostics: log the first entry to each hot main-loop PC.
+    psprecomp::set_runtime_post_dispatch_hook(&log_main_loop_entries);
 }
 
 void spongebob_profile_tick(psprecomp::Runtime &rt) {
