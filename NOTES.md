@@ -279,3 +279,21 @@ con logo naranja + azul claro #73BDFF). El error de disco ya no bloquea.
 `sceCtrl` (input): la pantalla de error pide "press any button", y el juego en
 general necesita input. Los stubs de sceCtrl (0x1F4011E6, 0x1F803938, 0x3A622550)
 devuelven 0.
+
+## Sesión 2026-09-29 (8) — sceCtrl (input) + confirmación del estado
+
+### Diagnóstico (logging UMD + ctrl)
+- `[umd] CheckMedium/Activate/WaitDriveStat/GetDriveStat` se llaman **una sola
+  vez** y pasan (0x32, 1, 0, 0). El fix de UMD funciona.
+- `[ctrl] pad` se llama repetidamente (el juego sondea input). Confirma que el
+  juego quedó esperando "press any button", NO re-chequeando el UMD.
+
+### sceCtrl implementado
+- `sceCtrlSetSamplingMode` (0x1F4011E6) → 0.
+- `sceCtrlPeekBufferPositive` (0x3A622550) y `sceCtrlReadBufferPositive`
+  (0x1F803938) → rellenan `SceCtrlData` (16 bytes) desde `display_window_input()`:
+  TimeStamp, Buttons (bitmask PSP), Lx/Ly, rx/ry.
+
+### Verificación visual (para el usuario)
+Correr LIVE (sin SDL_VIDEODRIVER=dummy) y presionar un botón → el juego debería
+salir de la pantalla "press any button" y continuar.

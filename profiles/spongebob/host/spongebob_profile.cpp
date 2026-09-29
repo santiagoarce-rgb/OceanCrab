@@ -379,9 +379,79 @@ void register_other_stubs(psprecomp::Runtime &rt) {
     // made that poll spin forever. Report the disc as inserted so the boot can
     // advance past the UMD wait.
     rt.register_hle("sceUmdUser", 0x6B4A146Cu,  // sceUmdGetDriveStat
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0x32u); });
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            static std::uint32_t calls = 0u;
+            ++calls;
+            if (calls <= 40u)
+                std::cerr << "[umd] GetDriveStat #" << calls << " uid="
+                          << psprecomp::runtime_thread_uid() << " -> 0x32\n";
+            ctx.set_gpr(2, 0x32u);
+        });
     rt.register_hle("sceUmdUser", 0x46EBB729u,  // sceUmdCheckMedium
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 1u); });
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            static std::uint32_t calls = 0u;
+            ++calls;
+            if (calls <= 40u)
+                std::cerr << "[umd] CheckMedium #" << calls << " uid="
+                          << psprecomp::runtime_thread_uid() << " -> 1\n";
+            ctx.set_gpr(2, 1u);
+        });
+    rt.register_hle("sceUmdUser", 0x8EF08FCEu,  // sceUmdWaitDriveStat
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            static std::uint32_t calls = 0u;
+            ++calls;
+            if (calls <= 40u)
+                std::cerr << "[umd] WaitDriveStat #" << calls << " uid="
+                          << psprecomp::runtime_thread_uid() << " a0="
+                          << psprecomp::hex32(ctx.gpr[4]) << " -> 0\n";
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceUmdUser", 0xC6183D47u,  // sceUmdActivate
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            static std::uint32_t calls = 0u;
+            ++calls;
+            if (calls <= 40u)
+                std::cerr << "[umd] Activate #" << calls << " uid="
+                          << psprecomp::runtime_thread_uid() << " a0="
+                          << psprecomp::hex32(ctx.gpr[4]) << " -> 0\n";
+            ctx.set_gpr(2, 0u);
+        });
+
+    // Minimal sceCtrl (input): expose the host keyboard/gamepad as the PSP pad.
+    rt.register_hle("sceCtrl", 0x1F4011E6u,  // sceCtrlSetSamplingMode
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });
+    const auto write_pad = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+        static std::uint32_t calls = 0u;
+        ++calls;
+        if (calls <= 10u)
+            std::cerr << "[ctrl] pad #" << calls << " uid=" << psprecomp::runtime_thread_uid()
+                      << " buttons=0x" << std::hex << display_window_input().buttons << std::dec << "\n";
+        const std::uint32_t destination = ctx.gpr[4];
+        const std::uint32_t count = ctx.gpr[5];
+        if (count == 0u) { ctx.set_gpr(2, 0u); return; }
+        constexpr std::uint32_t kSampleSize = 16u;
+        if (count > 64u ||
+            rt.memory().raw_pointer(destination, static_cast<std::size_t>(count) * kSampleSize) == nullptr) {
+            ctx.set_gpr(2, 0x80000103u);
+            return;
+        }
+        const HostInputState input = display_window_input();
+        for (std::uint32_t i = 0u; i < count; ++i) {
+            const std::uint32_t sample = destination + i * kSampleSize;
+            rt.memory().store32(sample, 0u);              // TimeStamp
+            rt.memory().store32(sample + 4u, input.buttons);  // Buttons (PSP bitmask)
+            rt.memory().store8(sample + 8u, input.analog_x);  // Lx
+            rt.memory().store8(sample + 9u, input.analog_y);  // Ly
+            rt.memory().store8(sample + 10u, 128u);           // rx
+            rt.memory().store8(sample + 11u, 128u);           // ry
+            rt.memory().zero(sample + 12u, 4u);               // Rsrv
+        }
+        ctx.set_gpr(2, count);
+    };
+    rt.register_hle("sceCtrl", 0x3A622550u,  // sceCtrlPeekBufferPositive
+        [write_pad](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) { write_pad(rt, ctx); });
+    rt.register_hle("sceCtrl", 0x1F803938u,  // sceCtrlReadBufferPositive
+        [write_pad](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) { write_pad(rt, ctx); });
 
     // sceIoGetstat: the boot polls this 444k times while the asset loader waits
     // for files. The generic stub returned 0 with an uninitialised SceIoStat, so

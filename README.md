@@ -34,7 +34,7 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 - [x] Verify rendering (1400+ frames presented, double buffering)
 - [x] HLE: IoFileMgr open/read/close/write/getstat (Fase C)
 - [x] HLE: sceGe_user display-list command walker + present wiring (Fase D)
-- [ ] HLE: sceCtrl (input) (Fase D)
+- [x] HLE: sceCtrl (input → SceCtrlData) (Fase D)
 - [x] HLE: sceAudio (reserve + output + pacing) (Fase E)
 - [x] **First frame rendered** 🎯
 
@@ -207,7 +207,7 @@ See `docs/ARCHITECTURE.md` for details.
 | B | ✅ Done | VBlank + timer HLE + FPL + `madd` family |
 | B.5 | ✅ Done | Configurable dispatch limit + main loop running |
 | C | ✅ Done | IoFileMgr (open/read/close/write/getstat) — asset loading |
-| D | 🟡 Partial | sceGe_user (display-list walker + Vulkan) done; sceCtrl pending |
+| D | ✅ Done | sceGe_user (display-list walker + Vulkan) + sceCtrl (input) |
 | E | ✅ Done | sceAudio (reserve + output + pacing) + sceSasCore |
 | F | ✅ Done | **First frame rendered** |
 
