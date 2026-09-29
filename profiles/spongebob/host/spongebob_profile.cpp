@@ -12,9 +12,11 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -357,6 +359,43 @@ void register_other_stubs(psprecomp::Runtime &rt) {
     // advance past the UMD wait.
     rt.register_hle("sceUmdUser", 0x6B4A146Cu,
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 2u); });
+
+    // sceIoGetstat: the boot polls this 444k times while the asset loader waits
+    // for files. The generic stub returned 0 with an uninitialised SceIoStat, so
+    // the guest read garbage and re-polled forever. Fill a real SceIoStat and
+    // return ENOENT for files that are not present on the host.
+    rt.register_hle("IoFileMgrForUser", 0xACE946E8u,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            static std::size_t traced = 0u;
+            const std::string path = rt.memory().read_c_string(ctx.gpr[4]);
+            if (traced < 30u) {
+                ++traced;
+                std::cerr << "[io] getstat uid=" << psprecomp::runtime_thread_uid()
+                          << " path=\"" << path << "\" ra=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+            }
+            const std::uint32_t stat_address = ctx.gpr[5];
+            if (stat_address == 0u || rt.memory().raw_pointer(stat_address, 0x58u) == nullptr) {
+                ctx.set_gpr(2, 0x80010016u);  // EINVAL
+                return;
+            }
+            try {
+                std::error_code error;
+                const std::filesystem::path native = rt.translate_path(path);
+                const bool directory = std::filesystem::is_directory(native, error);
+                const bool regular = std::filesystem::is_regular_file(native, error);
+                if (!directory && !regular) { ctx.set_gpr(2, 0x80010002u); return; }  // ENOENT
+                rt.memory().zero(stat_address, 0x58u);
+                rt.memory().store32(stat_address + 0x00u, (directory ? 0x1000u : 0x2000u) | 0x01FFu);
+                rt.memory().store32(stat_address + 0x04u, directory ? 0x0010u : 0x0020u);
+                const std::uint64_t size = regular
+                    ? static_cast<std::uint64_t>(std::filesystem::file_size(native, error)) : 0u;
+                rt.memory().store32(stat_address + 0x08u, static_cast<std::uint32_t>(size));
+                rt.memory().store32(stat_address + 0x0Cu, static_cast<std::uint32_t>(size >> 32u));
+                ctx.set_gpr(2, 0u);
+            } catch (...) {
+                ctx.set_gpr(2, 0x80010002u);  // ENOENT
+            }
+        });
 }
 
 // ---------------------------------------------------------------------------

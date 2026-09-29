@@ -159,6 +159,10 @@ int main(int argc, char **argv) {
 
         std::cout << "Runtime stopped: " << runtime.stop_reason() << "\n";
 
+        // HLE call census (PSPRECOMP_HLE_HISTOGRAM=1) — tells which imports each
+        // subsystem actually reached, and resolves NID names for free.
+        runtime.report_hle_histogram(100u);
+
         // 7. Cleanup.
         spongebob::audio_output_shutdown();
         spongebob::display_window_shutdown();

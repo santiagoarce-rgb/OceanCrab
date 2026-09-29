@@ -90,3 +90,42 @@ thread no avanza al render loop.
    llama el worker uid 4 y qué flag espera el main thread (`0x8A82704+224`).
 2. Hacer que el stub apropiado señale "listo" (o que el poll avance) para
    desbloquear el paso al render loop → entonces sí entra SetFrameBuf + present.
+
+## Sesión 2026-09-29 (2) — diagnóstico con histograma HLE + IoFileMgr
+
+### Instrumentación
+- Añadido `runtime.report_hle_histogram(100)` en `main.cpp` (gated por
+  `PSPRECOMP_HLE_HISTOGRAM=1`). Resuelve el nombre de cada NID vía `nids_`.
+
+### Resultado del histograma (3M dispatches)
+El juego **NO** está girando en audio. Los NIDs dominantes son de **file I/O**:
+- `sceIoGetstat` (0xACE946E8): **444k** llamadas.
+- `sceIoWrite` (0x42EC03AC): 222k.
+- `StdioForUser` 0xA6BAB2E9: 222k.
+- `sceUmdGetDriveStat` (0x6B4A146C): 111k.
+
+Audio apenas: `sceAudio:0x5EC81C55` (4×), `sceSasCore:0x42778A9F` (1×),
+**cero `sceAtrac3plus`**. El worker uid 4 no es el cuello de botella.
+
+### Qué sondea el main thread (uid 2)
+`sceIoGetstat` en bucle sobre **`fonts.pkg`** en 4 rutas (ra=0x089AEAF8):
+1. `disc0:/PSP_GAME/USRDIR/pkg/fonts.pkg`
+2. `disc0:/PSP_GAME/USRDIR/sound/common/pkg/fonts.pkg`
+3. `disc0:/PSP_GAME/USRDIR/sound/music/pkg/fonts.pkg`
+4. `pkg/fonts.pkg`
+
+### Fix aplicado
+`sceIoGetstat` ahora rellena un `SceIoStat` real (mode/attr/size, 0x58 bytes) y
+devuelve `ENOENT` (0x80010002) si el archivo no está en el host (port de VCS).
+
+### Bloqueador real → **assets no extraídos**
+`profiles/spongebob/original/` **solo contiene `ULUS10478_EBOOT.ELF`** — no hay
+`PSP_GAME/USRDIR/`. El juego espera `fonts.pkg` en el disco (UMD) y reintenta
+para siempre aunque `sceIoGetstat` devuelva ENOENT. Es un problema de **datos**,
+no de código.
+
+### Próximo paso
+1. Extraer los assets del juego (contenido de `PSP_GAME/USRDIR`) a
+   `profiles/spongebob/original/PSP_GAME/USRDIR/` — mínimo `pkg/fonts.pkg`.
+2. Implementar `sceIoOpen`/`sceIoRead`/`sceIoClose` (Fase C) para que, una vez
+   presente el archivo, el loader pueda leerlo y avanzar al render loop.
