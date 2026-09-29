@@ -9,9 +9,11 @@
 #include "spongebob_render_config.hpp"
 #include "spongebob_runtime_log.hpp"
 
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <string>
 
 namespace {
@@ -57,6 +59,23 @@ BootstrapPaths resolve_bootstrap_paths(int argc, char **argv,
         }
     }
     return paths;
+}
+
+// Same dispatch cap as VCS: keep a direct double-click long-lived enough for an
+// actual play session, while allowing PSPRECOMP_MAX_DISPATCHES for diagnostics.
+std::uint64_t configured_max_dispatches() {
+    constexpr std::uint64_t default_limit = 4'000'000'000ull;
+    const char *text = std::getenv("PSPRECOMP_MAX_DISPATCHES");
+    if (text == nullptr || *text == '\0') return default_limit;
+
+    errno = 0;
+    char *end = nullptr;
+    const unsigned long long parsed = std::strtoull(text, &end, 0);
+    if (errno == ERANGE || end == text || *end != '\0' || parsed == 0u ||
+        parsed > std::numeric_limits<std::uint64_t>::max()) {
+        throw psprecomp::Error(std::string("Invalid PSPRECOMP_MAX_DISPATCHES value: ") + text);
+    }
+    return static_cast<std::uint64_t>(parsed);
 }
 
 } // namespace
@@ -134,7 +153,9 @@ int main(int argc, char **argv) {
                   << (configuration.loaded_from_file ? " (loaded)" : " (defaults)") << "\n";
 
         // 6. Boot. elf.runtime_entry() == 0x08804124 for ULUS-10478.
-        runtime.run(elf.runtime_entry());
+        const std::uint64_t max_dispatches = configured_max_dispatches();
+        std::cout << "Dispatch cap: " << max_dispatches << "\n";
+        runtime.run(elf.runtime_entry(), max_dispatches);
 
         std::cout << "Runtime stopped: " << runtime.stop_reason() << "\n";
 
