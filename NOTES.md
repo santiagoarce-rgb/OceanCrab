@@ -201,3 +201,28 @@ en `0x08A09B4C` — siguiente fase: audio (Fase E, sceSasCore/sceAudio ya semi-h
   sin display (headless). Confirma que se renderiza contenido real (texto/logos),
   no solo clear o pantalla negra. Los PNG se derivan con ffmpeg y van en `dumps/`
   (ignorado por git).
+
+## Sesión 2026-09-29 (5) — sceAudio mínimo (Fase E) + gap de codegen
+
+### sceAudio (reserve + output + pacing)
+- Añadido `AudioChannelState` + `audio_channels[8]` y `register_audio_hle()`:
+  - `sceAudioChReserve` (0x5EC81C55), `sceAudioOutputBlocking` (0x136CAF51),
+    `sceAudioOutputPannedBlocking` (0x13F592BC), `sceAudioOutput` (0xE2D56B2D).
+  - `audio_queue_buffer` (pacing en la línea de tiempo virtual) + `suspend_for_wakeup`
+    para que el worker de audio duerma en vez de girar.
+  - Envía PCM a `audio_output_submit` cuando `PSPRECOMP_AUDIO` está activo.
+- Se registra **después** de `register_other_stubs` (sobrescribe los stubs).
+
+### Resultado
+- El worker de audio ya no gira: `sceAudioOutput*` 2081×, `__sceSasCore` 2081×.
+- El juego avanzó de **191 → 713 frames** (mucha más carga/loading).
+
+### Nuevo bloqueador → gap de codegen
+- `Runtime stopped: Unsupported ... 0x00000000 at 0x0892802C: invalid internal
+  function entry`. `0x0892802C` **no está** en `ULUS10478_report_functions_auto.csv`
+  → el `--auto` codegen no generó esa entrada (probable salto computado / jump
+  table no resuelto).
+
+### Próximo paso
+1. Investigar `0x0892802C`: añadir como seed en `functions.csv` y regenerar el
+   corpus AOT (o ver si es un salto computado que el análisis perdió).

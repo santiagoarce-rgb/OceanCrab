@@ -1,5 +1,6 @@
 #include "spongebob_profile.hpp"
 #include "spongebob_sas.hpp"
+#include "spongebob_audio_output.hpp"
 #include "display_window.hpp"
 #include "ge_gpu_backend.hpp"
 #include "ge_renderer.hpp"
@@ -67,6 +68,19 @@ struct FileTable {
 GeState ge_state{};
 GeListTable ge_list_table{};
 FileTable file_table{};
+
+// Minimal sceAudio state: one hardware channel per slot (VCS AudioChannelState).
+struct AudioChannelState {
+    bool reserved{};
+    std::uint32_t sample_count{};
+    std::uint32_t format{};      // 0 = stereo, 0x10 = mono
+    std::uint32_t frequency{44100u};
+    std::uint32_t left_volume{};
+    std::uint32_t right_volume{};
+    std::uint64_t busy_until_us{};
+    std::uint64_t queued_frames{};
+};
+std::array<AudioChannelState, 8> audio_channels{};
 
 constexpr std::uint32_t kEdramBase = 0x04000000u;  // PSP VRAM base.
 constexpr std::uint32_t kEdramSize = 0x00200000u;  // 2 MB.
@@ -1005,6 +1019,97 @@ void present_display_frame(psprecomp::Runtime &rt) {
                            display_state.pixel_format, display_state.width, display_state.height);
 }
 
+// Schedule one audio buffer on the channel's virtual-time grid and return the
+// instant the hardware would start playing it (VCS audio_queue_buffer).
+std::uint64_t audio_queue_buffer(AudioChannelState &channel, std::uint32_t frames) {
+    const std::uint64_t rate = channel.frequency == 0u ? 44100u : channel.frequency;
+    const auto elapsed_us = [&](std::uint64_t sample_frames) {
+        return (sample_frames * 1000000ull) / rate;
+    };
+    std::uint64_t start = channel.busy_until_us;
+    if (start < virtual_time_us) start = virtual_time_us;
+    channel.busy_until_us = start + elapsed_us(frames);
+    channel.queued_frames += frames;
+    return start;
+}
+
+// Minimal sceAudio (Fase E): reserve + output so the audio worker paces instead
+// of spinning, and PCM reaches the host device when PSPRECOMP_AUDIO is set.
+void register_audio_hle(psprecomp::Runtime &rt) {
+    const auto reserve = [](psprecomp::AllegrexContext &ctx) {
+        std::int32_t channel = static_cast<std::int32_t>(ctx.gpr[4]);
+        const std::uint32_t sample_count = ctx.gpr[5];
+        const std::uint32_t format = ctx.gpr[6];
+        if (channel < 0) {
+            channel = -1;
+            for (std::int32_t candidate = 7; candidate >= 1; --candidate) {
+                if (!audio_channels[static_cast<std::size_t>(candidate)].reserved) {
+                    channel = candidate; break;
+                }
+            }
+            if (channel < 0) { ctx.set_gpr(2, 0x80260005u); return; }
+        }
+        if (channel >= 8) { ctx.set_gpr(2, 0x80260003u); return; }
+        if (sample_count == 0u || (sample_count & 63u) != 0u || sample_count > 65472u) {
+            ctx.set_gpr(2, 0x80260006u); return;
+        }
+        if (format != 0u && format != 0x10u) { ctx.set_gpr(2, 0x80260007u); return; }
+        auto &state = audio_channels[static_cast<std::size_t>(channel)];
+        if (state.reserved) { ctx.set_gpr(2, 0x80268002u); return; }
+        state = AudioChannelState{};
+        state.reserved = true;
+        state.sample_count = sample_count;
+        state.format = format;
+        ctx.set_gpr(2, static_cast<std::uint32_t>(channel));
+    };
+    rt.register_hle("sceAudio", 0x5EC81C55u,  // sceAudioChReserve
+        [reserve](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { reserve(ctx); });
+
+    const auto output = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx, bool blocking) {
+        const std::uint32_t channel = ctx.gpr[4];
+        const std::uint32_t left = ctx.gpr[5];
+        const std::uint32_t right = ctx.gpr[6];
+        const std::uint32_t samples = ctx.gpr[7];
+        if (channel >= 8u) { ctx.set_gpr(2, 0x80260003u); return; }
+        auto &state = audio_channels[channel];
+        if (!state.reserved) { ctx.set_gpr(2, 0x80260001u); return; }
+        if (left > 0xFFFFu || right > 0xFFFFu) { ctx.set_gpr(2, 0x8026000Bu); return; }
+        const std::uint32_t channels = state.format == 0x10u ? 1u : 2u;
+        const std::size_t bytes = static_cast<std::size_t>(state.sample_count) * channels * 2u;
+        if (samples != 0u && rt.memory().raw_pointer(samples, bytes) == nullptr) {
+            ctx.set_gpr(2, 0x800200D3u); return;
+        }
+        state.left_volume = left;
+        state.right_volume = right;
+        const std::uint64_t start_us = audio_queue_buffer(state, state.sample_count);
+        if (samples != 0u && audio_output_enabled()) {
+            std::vector<std::int16_t> pcm(bytes / sizeof(std::int16_t));
+            const std::uint8_t *base = rt.memory().raw_pointer(samples, bytes);
+            for (std::size_t i = 0u; i < pcm.size(); ++i)
+                pcm[i] = static_cast<std::int16_t>(base[i * 2u] | (base[i * 2u + 1u] << 8));
+            audio_output_submit(pcm, state.sample_count, channels == 2u, left, right,
+                                state.frequency, channel, start_us, virtual_time_us);
+        }
+        const std::uint64_t wait_us = start_us > virtual_time_us ? start_us - virtual_time_us : 0u;
+        if (blocking)
+            suspend_for_wakeup(rt, ctx, virtual_time_us + wait_us);
+        else
+            ctx.set_gpr(2, state.sample_count);
+    };
+    rt.register_hle("sceAudio", 0x13F592BCu,  // sceAudioOutputPannedBlocking
+        [output](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) { output(rt, ctx, true); });
+    rt.register_hle("sceAudio", 0x136CAF51u,  // sceAudioOutputBlocking (volume, buffer)
+        [output](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const std::uint32_t volume = ctx.gpr[5];
+            const std::uint32_t buffer = ctx.gpr[6];
+            ctx.set_gpr(6, volume);
+            ctx.set_gpr(7, buffer);
+            output(rt, ctx, true);
+        });
+    rt.register_hle("sceAudio", 0xE2D56B2Du,  // sceAudioOutput (non-blocking)
+        [output](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) { output(rt, ctx, false); });
+}
+
 void register_display_hle(psprecomp::Runtime &rt) {
     // sceDisplayWaitVblank* — park the caller until the next virtual VBlank.
     const auto wait_vblank = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
@@ -1112,6 +1217,7 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
     register_threadman_hle(rt);  // ThreadManForUser (9) — Fase A.
     register_display_hle(rt);    // sceDisplay (8) — Fase B (VBlank + framebuffer).
     register_other_stubs(rt);    // everything else (IoFileMgrForUser, ...).
+    register_audio_hle(rt);      // sceAudio (reserve + output + pacing) — Fase E.
 
     // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
     // syscall, syscall 0) jumps to guest address 0. Map it to the thread

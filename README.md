@@ -34,7 +34,7 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 - [x] HLE: IoFileMgr open/read/close/write/getstat (Fase C)
 - [x] HLE: sceGe_user display-list command walker + present wiring (Fase D)
 - [ ] HLE: sceCtrl (input) (Fase D)
-- [ ] HLE: sceAudio (PCM output) (Fase E)
+- [x] HLE: sceAudio (reserve + output + pacing) (Fase E)
 - [x] **First frame rendered** 🎯
 
 ## Technical Highlights
