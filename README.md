@@ -8,7 +8,7 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 
 ## Status
 
-> **Active development.** The game boots, relocates the EBOOT (116,565 relocs), runs `module_start`, spawns the worker thread, switches threads correctly, and executes **10 million dispatches of real game code without a single unsupported instruction**. VBlank/timer scheduling, SysMem, ThreadMan, FPL, and the `madd`/`maddu`/`msub`/`msubu` multiply-accumulate instructions are all working. The runtime currently stops at its dispatch limit (`0x08971930`) — a safety cap, not a crash. Next milestones: IoFileMgr (asset loading), sceGe_user (display lists → Vulkan), and first frame rendering.
+> **Active development.** The game boots, relocates the EBOOT (116,565 relocs), runs `module_start`, spawns the worker thread, switches threads correctly, and runs its **main game loop indefinitely** (40M+ dispatches with no unsupported instructions, no memory faults, no crashes). VBlank/timer scheduling, SysMem, ThreadMan, FPL, and the `madd`/`maddu`/`msub`/`msubu` multiply-accumulate instructions are all working. Next milestones: verify rendering, then IoFileMgr (asset loading) and sceGe_user (display lists → Vulkan).
 
 ### Progress
 
@@ -28,8 +28,9 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 - [x] Kernel-syscall handling (`jal 0x00000000` → thread return)
 - [x] Instruction: `madd` / `maddu` / `msub` / `msubu`
 - [x] VBlank + timer scheduling (starvation hook, virtual time)
-- [x] Game runs 10M dispatches without errors
-- [ ] Configurable dispatch limit + busy-wait detection
+- [x] Game runs 10M+ dispatches without errors
+- [x] Configurable dispatch limit (`PSPRECOMP_MAX_DISPATCHES`, default 4B)
+- [ ] Verify rendering (Vulkan frames present)
 - [ ] HLE: IoFileMgr + ModuleMgr (Fase C — asset loading)
 - [ ] HLE: sceGe_user (display lists → Vulkan) (Fase D)
 - [ ] HLE: sceCtrl (input) (Fase D)
@@ -39,8 +40,6 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 ## Technical Highlights
 
 ### Boot sequence (working)
-
-The game currently reaches this flow:
 
 ```
 EBOOT.ELF load → relocation (116,565 relocs, 0 invalid)
@@ -63,9 +62,9 @@ Thread switch → worker thread runs
    ↓
 Worker: CreateFpl (7 MB heap), TryAllocateFpl, madd-heavy math
    ↓
-... 10M dispatches of real game code
+Main game loop (PC cycles: 0x08971930 → 0x08A2C448 → 0x08A08EBC)
    ↓
-Runtime stopped: Dispatch limit reached at 0x08971930
+Runs indefinitely (40M+ dispatches, no self-stop)
 ```
 
 ### Codegen fixes (contributed upstream)
@@ -165,10 +164,10 @@ profiles/spongebob/original/ULUS10478_EBOOT.ELF
 Then run:
 
 ```bash
-# Default dispatch limit
+# Default dispatch limit (4 billion, like VCS)
 ./out/crab/profiles/spongebob/SpongeBobNative
 
-# Or with a higher limit (env variable, like VCS)
+# Or with a custom limit
 PSPRECOMP_MAX_DISPATCHES=100000000 \
     ./out/crab/profiles/spongebob/SpongeBobNative
 ```
@@ -182,8 +181,11 @@ Executable: .../ULUS10478_EBOOT.ELF
 Entry:      0x08804124
 Relocs:     116565 (invalid 0, unsupported 0)
 Functions:  118531
-Config:     .../SpongeBobNative.ini (loaded)
-Runtime stopped: Dispatch limit reached at 0x08971930
+Dispatch cap: 4000000000
+[progress] dispatch=10000000 pc=0x08971930
+[progress] dispatch=20000000 pc=0x08A2C448
+[progress] dispatch=30000000 pc=0x08A08EBC
+...
 ```
 
 ## Architecture
@@ -202,8 +204,8 @@ See `docs/ARCHITECTURE.md` for details.
 |-------|--------|-------------|
 | A | ✅ Done | SysMem + ThreadMan + thread switch |
 | B | ✅ Done | VBlank + timer HLE + FPL + `madd` family |
-| B.5 | 🟡 In progress | Configurable dispatch limit + busy-wait detection |
-| C | ⏳ Next | IoFileMgr + ModuleMgr (asset loading from disc) |
+| B.5 | ✅ Done | Configurable dispatch limit + main loop running |
+| C | ⏳ Next | Verify rendering; IoFileMgr + ModuleMgr (asset loading) |
 | D | ⏳ | sceGe_user (display lists → Vulkan) + sceCtrl |
 | E | ⏳ | sceAudio + sceSasCore (PCM playback) |
 | F | 🎯 | **First frame rendered** |
