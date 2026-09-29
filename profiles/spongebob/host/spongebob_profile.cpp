@@ -185,7 +185,7 @@ static constexpr ImportStub kOtherStubs[] = {
     {"sceNetAdhocctl", 0xEC0635C1u},
     {"scePower", 0x04B7766Eu}, {"scePower", 0xDFA8BAF8u},
     {"sceSuspendForUser", 0x090CCB3Fu},
-    {"sceUmdUser", 0x46EBB729u}, {"sceUmdUser", 0x6B4A146Cu}, {"sceUmdUser", 0x8EF08FCEu}, {"sceUmdUser", 0xC6183D47u},
+    {"sceUmdUser", 0x46EBB729u}, {"sceUmdUser", 0x8EF08FCEu}, {"sceUmdUser", 0xC6183D47u},
     {"sceUtility", 0x2A2B3DE0u}, {"sceUtility", 0x2AD8E239u}, {"sceUtility", 0x34B78343u}, {"sceUtility", 0x50C4CD57u},
     {"sceUtility", 0x67AF3428u}, {"sceUtility", 0x8874DBE0u}, {"sceUtility", 0x95FC253Bu}, {"sceUtility", 0x9790B33Cu},
     {"sceUtility", 0x9A1C91D7u}, {"sceUtility", 0xA5DA2406u}, {"sceUtility", 0xD4B95FFBu}, {"sceUtility", 0xE49BFE92u},
@@ -199,6 +199,13 @@ void register_other_stubs(psprecomp::Runtime &rt) {
     for (const ImportStub &stub : kOtherStubs) {
         register_generic_stub(rt, stub.library, stub.nid);
     }
+
+    // sceUmdGetDriveStat — the boot polls this until it reports "disc inserted"
+    // (state 2) with a 100 ms delay in between. Returning 0 (the generic stub)
+    // made that poll spin forever. Report the disc as inserted so the boot can
+    // advance past the UMD wait.
+    rt.register_hle("sceUmdUser", 0x6B4A146Cu,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 2u); });
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +225,7 @@ struct ThreadRecord {
     ThreadState state{ThreadState::Ready};
     std::uint32_t exit_status{};
     std::uint64_t wake_at_us{};  // 0 == not waiting; else virtual-time wake deadline.
+    std::uint32_t waiting_on_thread{0u};  // 0 == not waiting on a thread; else uid being waited on.
 };
 
 struct ThreadTable {
@@ -406,7 +414,24 @@ bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ct
     return false;
 }
 
+// Wake every thread that was blocked in sceKernelWaitThreadEnd on the just-
+// completed thread. These waiters have no wake_at_us deadline, so the idle path
+// never promotes them — this is the only thing that can unblock them.
+void wake_thread_end_waiters(psprecomp::Runtime &rt, std::uint32_t completed_uid) {
+    for (auto &[uid, rec] : thread_table.threads) {
+        if (rec.state == ThreadState::Waiting && rec.waiting_on_thread == completed_uid) {
+            rec.state = ThreadState::Ready;
+            rec.waiting_on_thread = 0u;
+            thread_table.ready_queue.push_back(uid);
+            std::cerr << "[thread] wake uid=" << uid
+                      << " (was waiting on " << completed_uid << ")\n";
+        }
+    }
+    (void)rt;
+}
+
 void complete_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    const std::uint32_t completed_uid = thread_table.current_uid;
     std::cerr << "[jal0] called from ra=" << psprecomp::hex32(ctx.gpr[31])
               << " current_uid=" << thread_table.current_uid
               << " a0=" << psprecomp::hex32(ctx.gpr[4]) << "\n";
@@ -419,6 +444,7 @@ void complete_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext 
     } else {
         std::cerr << "[thread] WARN: complete for untracked uid=" << thread_table.current_uid << "\n";
     }
+    wake_thread_end_waiters(rt, completed_uid);
     (void)activate_next_thread(rt, ctx);
 }
 
@@ -562,15 +588,28 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     // sceKernelWaitThreadEnd.
     rt.register_hle("ThreadManForUser", 0x278C0DF5u,
         [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
-            const auto target = thread_table.threads.find(ctx.gpr[4]);
-            if (target == thread_table.threads.end()) { ctx.set_gpr(2, 0x80020198u); return; }
-            if (target->second.state == ThreadState::Completed) {
+            const std::uint32_t target = ctx.gpr[4];   // uid del thread a esperar.
+            if (target == thread_table.current_uid) {
+                ctx.set_gpr(2, 0x800201A7u);  // SCE_KERNEL_ERROR_ILLEGAL_THID.
+                return;
+            }
+            const auto target_rec = thread_table.threads.find(target);
+            if (target_rec == thread_table.threads.end()) {
+                ctx.set_gpr(2, 0x800201A7u);
+                return;
+            }
+            if (target_rec->second.state == ThreadState::Completed) {
                 ctx.set_gpr(2, 0u);
                 return;
             }
+            // Bloqueo real: guardar contexto + uid del target. Sin wake_at_us:
+            // es un wait por evento, no por tiempo.
             if (auto current = thread_table.threads.find(thread_table.current_uid);
                 current != thread_table.threads.end()) {
+                current->second.context = ctx;
+                current->second.context.pc = ctx.gpr[31];
                 current->second.state = ThreadState::Waiting;
+                current->second.waiting_on_thread = target;
             }
             (void)activate_next_thread(rt, ctx);
         });
