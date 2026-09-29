@@ -333,6 +333,34 @@ const char *thread_state_name(ThreadState state) {
     return "?";
 }
 
+void dump_thread_state() {
+    std::cerr << "[thread] === FINAL STATE ===\n";
+    for (auto &[uid, rec] : thread_table.threads) {
+        std::cerr << "[thread] uid=" << uid
+                  << " state=" << thread_state_name(rec.state)
+                  << " entry=" << psprecomp::hex32(rec.entry)
+                  << " exit=" << rec.exit_status << "\n";
+    }
+    std::cerr << "[thread] current_uid=" << thread_table.current_uid << "\n";
+}
+
+bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx);
+
+// Cooperative yield: park the current thread back on the Ready queue (resuming
+// after the HLE call at $ra) and switch to the next runnable thread. This is the
+// Wii "blr yield" analogue — without it, a spinner that never blocks would drain
+// the Ready queue and leave every thread stranded in "Running" state.
+void yield_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    if (auto it = thread_table.threads.find(thread_table.current_uid);
+        it != thread_table.threads.end()) {
+        it->second.context = ctx;
+        it->second.context.pc = ctx.gpr[31];   // resume after the HLE call.
+        it->second.state = ThreadState::Ready;
+        thread_table.ready_queue.push_back(it->second.uid);
+    }
+    (void)activate_next_thread(rt, ctx);
+}
+
 // Restore the next Ready thread's full context into `ctx` and switch the
 // runtime thread identity. Stops the runtime when no thread is left runnable.
 bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
@@ -348,6 +376,7 @@ bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ct
                 earliest = record.wake_at_us;
         }
         if (earliest == ~std::uint64_t{0}) {
+            dump_thread_state();
             std::cerr << "[thread] NO READY THREADS, stopping\n";
             rt.stop("all PSP threads completed");
             return false;
@@ -367,8 +396,11 @@ bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ct
         psprecomp::set_runtime_thread_identity(static_cast<std::int32_t>(uid), record.name);
         std::cerr << "[thread] switch to uid=" << uid
                   << " state=" << thread_state_name(record.state) << "\n";
+        std::cerr << "[thread] now running uid=" << thread_table.current_uid
+                  << " pc=" << psprecomp::hex32(ctx.pc) << "\n";
         return true;
     }
+    dump_thread_state();
     std::cerr << "[thread] NO READY THREADS, stopping\n";
     rt.stop("all PSP threads completed");
     return false;
@@ -552,10 +584,14 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     // sceKernelExitDeleteThread — complete, remove, and switch.
     rt.register_hle("ThreadManForUser", 0x809CE29Bu,
         [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            std::cerr << "[thread] ExitDeleteThread called, uid=" << thread_table.current_uid
+                      << " status=" << ctx.gpr[4]
+                      << " ra=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
             if (const auto it = thread_table.threads.find(thread_table.current_uid);
                 it != thread_table.threads.end()) {
                 it->second.state = ThreadState::Completed;
                 it->second.exit_status = ctx.gpr[4];
+                std::cerr << "[thread] delete uid=" << thread_table.current_uid << "\n";
                 thread_table.threads.erase(it);
             }
             (void)activate_next_thread(rt, ctx);
@@ -761,12 +797,14 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
                 busywait_same_pc_count = 0u;
                 static std::uint64_t spin_yield_count = 0u;
                 ++spin_yield_count;
-                if (spin_yield_count <= 5u || (spin_yield_count % 1000u) == 0u) {
+                if (spin_yield_count <= 10u || (spin_yield_count % 1000u) == 0u) {
                     std::cerr << "[spin-yield] #" << spin_yield_count
                               << " pc=" << psprecomp::hex32(ctx.pc)
+                              << " from_uid=" << thread_table.current_uid
+                              << " queue_size=" << thread_table.ready_queue.size()
                               << " dispatch=" << (starvation_tick_total * kTickDispatchInterval) << "\n";
                 }
-                (void)activate_next_thread(rt, ctx);
+                yield_current_thread(rt, ctx);
             }
 
             // Frame summary every ~100k dispatches (~390 ticks).
