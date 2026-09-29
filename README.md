@@ -32,7 +32,7 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 - [x] Configurable dispatch limit (`PSPRECOMP_MAX_DISPATCHES`, default 4B)
 - [ ] Verify rendering (Vulkan frames present)
 - [ ] HLE: IoFileMgr + ModuleMgr (Fase C — asset loading)
-- [ ] HLE: sceGe_user (display lists → Vulkan) (Fase D)
+- [x] HLE: sceGe_user display-list command walker + present wiring (Fase D)
 - [ ] HLE: sceCtrl (input) (Fase D)
 - [ ] HLE: sceAudio (PCM output) (Fase E)
 - [ ] **First frame rendered** 🎯

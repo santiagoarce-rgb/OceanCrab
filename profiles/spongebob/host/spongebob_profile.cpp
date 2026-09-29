@@ -1,5 +1,7 @@
 #include "spongebob_profile.hpp"
 #include "spongebob_sas.hpp"
+#include "display_window.hpp"
+#include "ge_gpu_backend.hpp"
 #include "ge_renderer.hpp"
 
 #include "psprecomp/common.hpp"
@@ -31,6 +33,7 @@ struct GeState {
     std::uint32_t offset_address{};
     std::uint32_t vertex_address{};
     std::uint32_t index_address{};
+    bool bounding_box_result{true};
 };
 
 struct GeListRecord {
@@ -56,6 +59,30 @@ GeListTable ge_list_table{};
 
 constexpr std::uint32_t kEdramBase = 0x04000000u;  // PSP VRAM base.
 constexpr std::uint32_t kEdramSize = 0x00200000u;  // 2 MB.
+
+// GE display-list command opcodes (the high byte of each 32-bit list word).
+constexpr std::uint32_t kGeCommandNop = 0x00u;
+constexpr std::uint32_t kGeCommandVertexAddress = 0x01u;
+constexpr std::uint32_t kGeCommandIndexAddress = 0x02u;
+constexpr std::uint32_t kGeCommandPrimitive = 0x04u;
+constexpr std::uint32_t kGeCommandBoundingBox = 0x07u;
+constexpr std::uint32_t kGeCommandJump = 0x08u;
+constexpr std::uint32_t kGeCommandBoundingBoxJump = 0x09u;
+constexpr std::uint32_t kGeCommandCall = 0x0Au;
+constexpr std::uint32_t kGeCommandReturn = 0x0Bu;
+constexpr std::uint32_t kGeCommandEnd = 0x0Cu;
+constexpr std::uint32_t kGeCommandSignal = 0x0Eu;
+constexpr std::uint32_t kGeCommandFinish = 0x0Fu;
+constexpr std::uint32_t kGeCommandBase = 0x10u;
+constexpr std::uint32_t kGeCommandOffsetAddress = 0x13u;
+constexpr std::uint32_t kGeCommandOrigin = 0x14u;
+
+// PSP relative address: (base << 20) | data24, added to the current offset.
+std::uint32_t ge_relative_address(std::uint32_t data) {
+    const std::uint32_t base_extended = ((ge_state.commands[kGeCommandBase] & 0x000F0000u) << 8u) |
+                                        (data & 0x00FFFFFFu);
+    return (ge_state.offset_address + base_extended) & 0x0FFFFFFFu;
+}
 
 // Instrumentation counters (diagnostics): how often the guest drives the GE and
 // display, and whether it is actually presenting frames or spinning in place.
@@ -90,7 +117,129 @@ void restore_ge_list_context(const GeListRecord &record) {
     ge_state.transform = record.saved_transform;
 }
 
-void ge_list_enqueue(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
+    constexpr std::uint32_t kMaximumCommandsPerRun = 4'000'000u;
+    const auto read_command = [&](std::uint32_t address, std::uint32_t &value) -> bool {
+        if (rt.memory().raw_pointer(address, 4u) == nullptr) return false;
+        value = rt.memory().load32(address);
+        return true;
+    };
+    struct CallFrame { std::uint32_t return_pc{}; std::uint32_t offset_address{}; std::uint32_t base{}; };
+    std::vector<CallFrame> call_stack;
+
+    list.state = GeListState::Running;
+    std::uint32_t executed = 0u;
+    while (executed < kMaximumCommandsPerRun) {
+        const std::uint32_t pc = list.pc;
+        if ((pc & 3u) != 0u) { list.state = GeListState::Error; return false; }
+        std::uint32_t op{};
+        if (!read_command(pc, op)) { list.state = GeListState::Error; return false; }
+
+        const std::uint32_t command = op >> 24u;
+        const std::uint32_t data = op & 0x00FFFFFFu;
+
+        ge_state.commands[command] = op;
+        if (command >= 0x2Au && command <= 0x3Fu)
+            update_ge_transform_state(ge_state.transform, command, data);
+
+        ++executed;
+        std::uint32_t next_pc = (pc + 4u) & 0x0FFFFFFFu;
+
+        switch (command) {
+        case kGeCommandNop:
+            break;
+        case kGeCommandVertexAddress:
+            ge_state.vertex_address = ge_relative_address(data);
+            break;
+        case kGeCommandIndexAddress:
+            ge_state.index_address = ge_relative_address(data);
+            break;
+        case kGeCommandPrimitive: {
+            GeRenderStats stats{};
+            std::string error;
+            if (!render_ge_primitive(rt.memory(), ge_state.commands, ge_state.transform,
+                                     ge_state.vertex_address, ge_state.index_address,
+                                     data, stats, error)) {
+                list.state = GeListState::Error;
+                std::cerr << "[ge] rasterizer failed pc=" << psprecomp::hex32(pc)
+                          << ": " << error << "\n";
+                return false;
+            }
+            ge_state.vertex_address = stats.next_vertex_address;
+            ge_state.index_address = stats.next_index_address;
+            break;
+        }
+        case kGeCommandBoundingBox: {
+            GeBoundingBoxResult result{};
+            std::string error;
+            if (!test_ge_bounding_box(rt.memory(), ge_state.commands, ge_state.transform,
+                                      ge_state.vertex_address, ge_state.index_address,
+                                      data & 0xFFFFu, result, error)) {
+                list.state = GeListState::Error;
+                return false;
+            }
+            ge_state.bounding_box_result = result.visible;
+            ge_state.vertex_address = result.next_vertex_address;
+            ge_state.index_address = result.next_index_address;
+            break;
+        }
+        case kGeCommandJump:
+            next_pc = ge_relative_address(data & 0x00FFFFFCu);
+            break;
+        case kGeCommandBoundingBoxJump:
+            if (!ge_state.bounding_box_result)
+                next_pc = ge_relative_address(data & 0x00FFFFFCu);
+            break;
+        case kGeCommandCall:
+            call_stack.push_back(CallFrame{next_pc, ge_state.offset_address,
+                                           ge_state.commands[kGeCommandBase]});
+            next_pc = ge_relative_address(data & 0x00FFFFFCu);
+            break;
+        case kGeCommandReturn:
+            if (call_stack.empty()) { list.state = GeListState::Error; return false; }
+            {
+                const CallFrame frame = call_stack.back();
+                call_stack.pop_back();
+                ge_state.offset_address = frame.offset_address;
+                ge_state.commands[kGeCommandBase] = frame.base;
+                next_pc = frame.return_pc & 0x0FFFFFFFu;
+            }
+            break;
+        case kGeCommandOffsetAddress:
+            ge_state.offset_address = op << 8u;
+            break;
+        case kGeCommandOrigin:
+            ge_state.offset_address = pc;
+            break;
+        case kGeCommandEnd: {
+            std::uint32_t previous{};
+            if (pc >= 4u && read_command(pc - 4u, previous) &&
+                (previous >> 24u) == kGeCommandFinish) {
+                list.state = GeListState::Completed;
+                list.pc = next_pc;
+                return true;
+            }
+            const std::uint32_t link = ge_relative_address(data);
+            if (link == 0u || link == pc) { list.state = GeListState::Completed; return true; }
+            next_pc = link;
+            break;
+        }
+        case kGeCommandSignal:
+        case kGeCommandFinish:
+            break;
+        default:
+            break;
+        }
+        list.pc = next_pc;
+    }
+
+    list.state = GeListState::Error;
+    std::cerr << "[ge] display list exceeded command safety limit pc="
+              << psprecomp::hex32(list.pc) << "\n";
+    return false;
+}
+
+void ge_list_enqueue(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
     const std::uint32_t list_address = ctx.gpr[4];
     const std::uint32_t stall_address = ctx.gpr[5];
     const std::uint32_t callback_id = ctx.gpr[6];
@@ -104,9 +253,11 @@ void ge_list_enqueue(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
     record.pc = list_address;
     record.callback_id = static_cast<std::int32_t>(callback_id);
     record.state = GeListState::Queued;
-    ge_list_table.lists[record.guest_id] = record;
-    ge_list_table.queue.push_back(record.guest_id);
-    ctx.set_gpr(2, record.guest_id);  // return list id.
+    const std::uint32_t guest_id = record.guest_id;
+    ge_list_table.lists[guest_id] = std::move(record);
+    ge_list_table.queue.push_back(guest_id);
+    ctx.set_gpr(2, guest_id);
+    (void)execute_ge_list(rt, ge_list_table.lists[guest_id]);
 }
 
 void ge_list_sync(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
@@ -702,6 +853,27 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
         });
 }
 
+// Present the current display framebuffer to the host window. Prefers the GPU
+// backend's readback when it produced a frame; otherwise blits guest VRAM via
+// the software path.
+void present_display_frame(psprecomp::Runtime &rt) {
+    display_window_pump();
+    if (display_state.frame_buffer == 0u) return;
+    if (ge_gpu_backend_active()) {
+        const std::uint64_t vblank = virtual_time_us / kVblankPeriodUs;
+        (void)ge_gpu_backend_finish_color_frame(vblank);
+        const GeGpuBackendReport report = ge_gpu_backend_report();
+        const std::span<const std::byte> rgba = ge_gpu_backend_game_frame_rgba();
+        if (!rgba.empty() && report.offscreen_width != 0u && report.offscreen_height != 0u) {
+            display_window_present_rgba(rgba, report.offscreen_width, report.offscreen_height);
+            ge_gpu_backend_mark_window_presented();
+            return;
+        }
+    }
+    display_window_present(rt, display_state.frame_buffer, display_state.buffer_width,
+                           display_state.pixel_format, display_state.width, display_state.height);
+}
+
 void register_display_hle(psprecomp::Runtime &rt) {
     // sceDisplayWaitVblank* — park the caller until the next virtual VBlank.
     const auto wait_vblank = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
@@ -710,6 +882,8 @@ void register_display_hle(psprecomp::Runtime &rt) {
             std::cerr << "[display] wait_vblank count=" << vblank_wait_count
                       << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
         }
+        // Advance GE and present the current frame before parking.
+        spongebob_profile_tick(rt);
         const std::uint64_t phase = virtual_time_us % kVblankPeriodUs;
         suspend_for_wakeup(rt, ctx, virtual_time_us + (kVblankPeriodUs - phase));
     };
@@ -739,6 +913,7 @@ void register_display_hle(psprecomp::Runtime &rt) {
                 last_frame_buffer = framebuf;
                 has_last_frame_buffer = true;
             }
+            ge_gpu_backend_set_display_framebuffer(framebuf, display_state.width, display_state.height);
             std::cerr << "[display] framebuf=" << psprecomp::hex32(framebuf)
                       << " width=" << ctx.gpr[5]
                       << " height=" << display_state.height << "\n";
@@ -861,14 +1036,17 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
 }
 
 void spongebob_profile_tick(psprecomp::Runtime &rt) {
-    // Minimal GE advance: mark every queued display list completed and clear the
-    // queue. Full command walking + render_ge_primitive() comes in a later phase.
+    // Advance any still-queued GE display lists (they are normally executed
+    // synchronously on enqueue; this drains leftovers defensively).
     for (std::uint32_t id : ge_list_table.queue) {
         auto it = ge_list_table.lists.find(id);
-        if (it != ge_list_table.lists.end()) it->second.state = GeListState::Completed;
+        if (it != ge_list_table.lists.end() && it->second.state == GeListState::Queued)
+            (void)execute_ge_list(rt, it->second);
     }
     ge_list_table.queue.clear();
-    (void)rt;
+
+    // Present the current display framebuffer to the host window.
+    present_display_frame(rt);
 }
 
 } // namespace spongebob
