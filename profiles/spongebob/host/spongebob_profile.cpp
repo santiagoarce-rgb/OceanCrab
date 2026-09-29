@@ -323,6 +323,16 @@ void promote_expired_delays() {
     }
 }
 
+const char *thread_state_name(ThreadState state) {
+    switch (state) {
+    case ThreadState::Ready: return "Ready";
+    case ThreadState::Running: return "Running";
+    case ThreadState::Waiting: return "Waiting";
+    case ThreadState::Completed: return "Completed";
+    }
+    return "?";
+}
+
 // Restore the next Ready thread's full context into `ctx` and switch the
 // runtime thread identity. Stops the runtime when no thread is left runnable.
 bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
@@ -338,6 +348,7 @@ bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ct
                 earliest = record.wake_at_us;
         }
         if (earliest == ~std::uint64_t{0}) {
+            std::cerr << "[thread] NO READY THREADS, stopping\n";
             rt.stop("all PSP threads completed");
             return false;
         }
@@ -354,17 +365,27 @@ bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ct
         thread_table.current_uid = uid;
         ctx = record.context;
         psprecomp::set_runtime_thread_identity(static_cast<std::int32_t>(uid), record.name);
+        std::cerr << "[thread] switch to uid=" << uid
+                  << " state=" << thread_state_name(record.state) << "\n";
         return true;
     }
+    std::cerr << "[thread] NO READY THREADS, stopping\n";
     rt.stop("all PSP threads completed");
     return false;
 }
 
 void complete_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    std::cerr << "[jal0] called from ra=" << psprecomp::hex32(ctx.gpr[31])
+              << " current_uid=" << thread_table.current_uid
+              << " a0=" << psprecomp::hex32(ctx.gpr[4]) << "\n";
     if (const auto it = thread_table.threads.find(thread_table.current_uid);
         it != thread_table.threads.end()) {
         it->second.state = ThreadState::Completed;
         it->second.exit_status = ctx.gpr[4];  // a0 == exit status.
+        std::cerr << "[thread] complete uid=" << thread_table.current_uid
+                  << " exit_status=" << ctx.gpr[4] << "\n";
+    } else {
+        std::cerr << "[thread] WARN: complete for untracked uid=" << thread_table.current_uid << "\n";
     }
     (void)activate_next_thread(rt, ctx);
 }
@@ -444,6 +465,10 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     rt.register_hle("ThreadManForUser", 0x446D8DE6u,
         [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
             const std::uint32_t uid = thread_table.next_uid++;
+            std::cerr << "[thread] create uid=" << uid
+                      << " entry=" << psprecomp::hex32(ctx.gpr[5])
+                      << " prio=" << ctx.gpr[6]
+                      << " stack=" << ctx.gpr[7] << "\n";
             const std::uint32_t stack_size = ctx.gpr[7];  // a3.
             ThreadRecord record{};
             record.uid = uid;
@@ -475,6 +500,7 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
             const auto it = thread_table.threads.find(ctx.gpr[4]);
             if (it == thread_table.threads.end()) { ctx.set_gpr(2, 0x80020198u); return; }
+            std::cerr << "[thread] start uid=" << ctx.gpr[4] << "\n";
             it->second.state = ThreadState::Ready;
             it->second.context.gpr[4] = ctx.gpr[5];  // arglen -> thread a0.
             it->second.context.gpr[5] = ctx.gpr[6];  // argp   -> thread a1.
@@ -519,6 +545,8 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     // sceKernelExitThread (0xAA73C935) — complete and switch; does not return.
     rt.register_hle("ThreadManForUser", 0xAA73C935u,
         [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            std::cerr << "[thread] ExitThread called, uid=" << thread_table.current_uid
+                      << " status=" << ctx.gpr[4] << "\n";
             complete_current_thread(rt, ctx);
         });
     // sceKernelExitDeleteThread — complete, remove, and switch.
@@ -678,6 +706,20 @@ void log_main_loop_entries(psprecomp::Runtime &, psprecomp::AllegrexContext &,
 } // namespace
 
 void install_spongebob_profile(psprecomp::Runtime &rt) {
+    // Registrar module_start como uid 1 (por si acaso).  En el PSP real el
+    // module_start es un thread del kernel; aquí no estaba en la tabla, así que
+    // su `jal 0x00000000` no encontraba el uid y hacía un switch sin completar.
+    {
+        ThreadRecord main;
+        main.uid = 1u;
+        main.entry = 0x08804124u;
+        main.stack_base = 0x09FFFF00u;   // mismo que k0/sp del main.
+        main.stack_size = 0u;
+        main.state = ThreadState::Running;
+        main.name = "module_start";
+        thread_table.threads[1u] = main;
+    }
+
     register_sas_hle(rt);        // sceSasCore (27) — full software implementation.
     register_ge_hle(rt);         // sceGe_user (14).
     register_atrac3_stubs(rt);   // sceAtrac3plus (8) — stubs.
