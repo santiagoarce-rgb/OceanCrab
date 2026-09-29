@@ -215,6 +215,16 @@ struct PartitionTable {
 
 PartitionTable partition_table{};
 
+struct FplPool {
+    std::string name;
+    std::uint32_t block_size{};
+    std::uint32_t num_blocks{};
+    std::uint32_t base_address{};
+    std::vector<std::uint32_t> free_list;  // block addresses, LIFO.
+};
+std::map<std::uint32_t, FplPool> fpl_pools;
+std::uint32_t next_fpl_uid = 1u;
+
 // Execution-driven virtual time (mirrors VCS's virtual_time_us). Advanced by the
 // runtime starvation hook and jumped directly to the next wakeup deadline when
 // the scheduler would otherwise idle.
@@ -490,14 +500,62 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
         ctx.set_gpr(2, next_callback_uid++);
     };
     rt.register_hle("ThreadManForUser", 0xE81CAF8Fu, return_uid);  // sceKernelCreateCallback
-    rt.register_hle("ThreadManForUser", 0xC07BB470u, return_uid);  // sceKernelCreateFpl
     rt.register_hle("ThreadManForUser", 0x55C20A00u, return_uid);  // sceKernelCreateEventFlag
     for (const std::uint32_t nid : {0xEDBA5844u, 0x1FB15A32u, 0xEF9E4C70u, 0x402FCF22u,
-                                    0xF8170FBEu, 0x0DDCD2C9u, 0x623AE665u, 0x6B30100Fu,
+                                    0xF8170FBEu, 0x0DDCD2C9u, 0x6B30100Fu,
                                     0x9FA03CD3u, 0xB011B11Fu, 0xB7D098C6u}) {
         rt.register_hle("ThreadManForUser", nid,
             [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });
     }
+
+    // FPL (Fixed Pool Library) — Fase B.2. Blocks are 64-byte aligned and carved
+    // out of the same upward arena as SysMem (0x09000000+). TryAllocateFpl MUST
+    // write the block address into *data (a1): the guest stores it on the stack
+    // and dereferences it right after, so leaving it NULL crashes the boot.
+    rt.register_hle("ThreadManForUser", 0xC07BB470u,  // sceKernelCreateFpl
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const std::uint32_t block_size = (ctx.gpr[7] + 63u) & ~63u;  // a3, 64-byte aligned.
+            const std::uint32_t num_blocks = ctx.gpr[8];                  // a4 (t0).
+            if (block_size == 0u || num_blocks == 0u) { ctx.set_gpr(2, 0x800200D9u); return; }
+            const std::uint32_t base = partition_table.next_address;
+            partition_table.next_address += block_size * num_blocks;
+            FplPool pool{};
+            pool.name = ctx.gpr[4] != 0u ? rt.memory().read_c_string(ctx.gpr[4], 128u) : "fpl";
+            pool.block_size = block_size;
+            pool.num_blocks = num_blocks;
+            pool.base_address = base;
+            for (std::uint32_t i = 0u; i < num_blocks; ++i)
+                pool.free_list.push_back(base + i * block_size);
+            const std::uint32_t uid = next_fpl_uid++;
+            fpl_pools[uid] = std::move(pool);
+            ctx.set_gpr(2, uid);
+        });
+    const auto allocate_fpl = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+        const auto it = fpl_pools.find(ctx.gpr[4]);  // a0 = uid.
+        if (it == fpl_pools.end()) { ctx.set_gpr(2, 0x80020198u); return; }
+        if (it->second.free_list.empty()) { ctx.set_gpr(2, 0x80020190u); return; }
+        const std::uint32_t addr = it->second.free_list.back();
+        it->second.free_list.pop_back();
+        if (ctx.gpr[5] != 0u) rt.memory().store32(ctx.gpr[5], addr);  // *data = addr (a1).
+        ctx.set_gpr(2, 0u);
+    };
+    rt.register_hle("ThreadManForUser", 0x623AE665u, allocate_fpl);  // sceKernelTryAllocateFpl
+    // sceKernelAllocateFpl is the blocking variant. The boot only imports the
+    // non-blocking TryAllocateFpl, so a plain non-blocking allocation suffices;
+    // a proper FPL wait queue (wake on FreeFpl) is deferred.
+    rt.register_hle("ThreadManForUser", 0xD979E9BFu, allocate_fpl);
+    rt.register_hle("ThreadManForUser", 0xF2574E14u,  // sceKernelFreeFpl
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const auto it = fpl_pools.find(ctx.gpr[4]);
+            if (it == fpl_pools.end()) { ctx.set_gpr(2, 0x80020198u); return; }
+            if (ctx.gpr[5] != 0u) it->second.free_list.push_back(ctx.gpr[5]);  // return block.
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("ThreadManForUser", 0xED1410E0u,  // sceKernelDeleteFpl
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            fpl_pools.erase(ctx.gpr[4]);
+            ctx.set_gpr(2, 0u);
+        });
 }
 
 void register_display_hle(psprecomp::Runtime &rt) {

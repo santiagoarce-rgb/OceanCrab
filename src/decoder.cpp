@@ -78,6 +78,10 @@ DecodedInstruction decode_allegrex(std::uint32_t word) {
         case 0x19: d.kind = OpcodeKind::Multu; d.mnemonic = "multu"; break;
         case 0x1A: d.kind = OpcodeKind::Div; d.mnemonic = "div"; break;
         case 0x1B: d.kind = OpcodeKind::Divu; d.mnemonic = "divu"; break;
+        case 0x1C: d.kind = OpcodeKind::Madd; d.mnemonic = "madd"; break;
+        case 0x1D: d.kind = OpcodeKind::Maddu; d.mnemonic = "maddu"; break;
+        case 0x1E: d.kind = OpcodeKind::Msub; d.mnemonic = "msub"; break;
+        case 0x1F: d.kind = OpcodeKind::Msubu; d.mnemonic = "msubu"; break;
         case 0x20: d.kind = OpcodeKind::Add; d.mnemonic = "add"; break;
         case 0x21: d.kind = OpcodeKind::Addu; d.mnemonic = "addu"; break;
         case 0x22: d.kind = OpcodeKind::Sub; d.mnemonic = "sub"; break;
