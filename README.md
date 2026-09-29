@@ -8,7 +8,7 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 
 ## Status
 
-> **Active development.** The game boots, relocates the EBOOT (116,565 relocs), runs `module_start`, spawns the worker thread, switches threads correctly, and runs its **main game loop indefinitely** (40M+ dispatches with no unsupported instructions, no memory faults, no crashes). VBlank/timer scheduling, SysMem, ThreadMan, FPL, and the `madd`/`maddu`/`msub`/`msubu` multiply-accumulate instructions are all working. Next milestones: verify rendering, then IoFileMgr (asset loading) and sceGe_user (display lists → Vulkan).
+> **Active development.** The game boots, relocates the EBOOT (116,565 relocs), loads its assets (968 files), renders frames (1400+ presented with double buffering), mixes audio (sceSasCore + sceAudio with pacing), and runs its **main game loop** with no unsupported instructions, no memory faults, and no crashes. Rendering (GE display-list walker → Vulkan), asset loading (IoFileMgr), and audio are wired end-to-end. Next: sceCtrl (input) and rendering polish.
 
 ### Progress
 
@@ -20,6 +20,7 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 - [x] Profile skeleton (176 imports registered)
 - [x] NID database completion (187 entries)
 - [x] AOT corpus generation (20 units, 56 MB, 118,530 functions)
+- [x] Codegen: jump-table + pointer-reached function detection (no "invalid function entry" gaps)
 - [x] Main runtime + EBOOT loader (relocation + module info + entry call)
 - [x] HLE: SysMem (partition allocator)
 - [x] HLE: ThreadMan (thread switch, context save/restore)
@@ -30,7 +31,7 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 - [x] VBlank + timer scheduling (starvation hook, virtual time)
 - [x] Game runs 10M+ dispatches without errors
 - [x] Configurable dispatch limit (`PSPRECOMP_MAX_DISPATCHES`, default 4B)
-- [x] Verify rendering (191 frames presented, double buffering)
+- [x] Verify rendering (1400+ frames presented, double buffering)
 - [x] HLE: IoFileMgr open/read/close/write/getstat (Fase C)
 - [x] HLE: sceGe_user display-list command walker + present wiring (Fase D)
 - [ ] HLE: sceCtrl (input) (Fase D)
@@ -205,9 +206,9 @@ See `docs/ARCHITECTURE.md` for details.
 | A | ✅ Done | SysMem + ThreadMan + thread switch |
 | B | ✅ Done | VBlank + timer HLE + FPL + `madd` family |
 | B.5 | ✅ Done | Configurable dispatch limit + main loop running |
-| C | ⏳ Next | Verify rendering; IoFileMgr + ModuleMgr (asset loading) |
-| D | ⏳ | sceGe_user (display lists → Vulkan) + sceCtrl |
-| E | ⏳ | sceAudio + sceSasCore (PCM playback) |
+| C | ✅ Done | IoFileMgr (open/read/close/write/getstat) — asset loading |
+| D | 🟡 Partial | sceGe_user (display-list walker + Vulkan) done; sceCtrl pending |
+| E | ✅ Done | sceAudio (reserve + output + pacing) + sceSasCore |
 | F | ✅ Done | **First frame rendered** |
 
 ## Contributing
