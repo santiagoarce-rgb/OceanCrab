@@ -45,3 +45,4 @@ tmp/
 # AOT corpus (derived from user's game executable - regenerable)
 profiles/*/generated/
 !profiles/*/generated/generated_units.hpp
+dumps/

@@ -959,6 +959,30 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
         });
 }
 
+// Diagnostic: write one presented RGBA frame to a PPM when PSPRECOMP_DUMP_FRAME
+// is set, so a headless run can be inspected without a display.
+void dump_frame_if_requested(std::span<const std::byte> rgba, std::uint32_t width, std::uint32_t height) {
+    const char *dir = std::getenv("PSPRECOMP_DUMP_FRAME");
+    if (dir == nullptr || dir[0] == '\0') return;
+    static const std::uint64_t kTargets[] = {1u, 40u, 80u, 120u, 160u, 190u};
+    bool dump = false;
+    for (const std::uint64_t target : kTargets) {
+        if (frame_present_count == target) { dump = true; break; }
+    }
+    if (!dump || rgba.empty() || width == 0u || height == 0u) return;
+    const std::string path = std::string(dir) + "/frame_" + std::to_string(frame_present_count) + ".ppm";
+    std::ofstream out(path, std::ios::binary);
+    if (!out) return;
+    out << "P6\n" << width << " " << height << "\n255\n";
+    for (std::size_t i = 0u; i < static_cast<std::size_t>(width) * height; ++i) {
+        out.put(static_cast<char>(rgba[i * 4u + 0u]));
+        out.put(static_cast<char>(rgba[i * 4u + 1u]));
+        out.put(static_cast<char>(rgba[i * 4u + 2u]));
+    }
+    std::cerr << "[dump] frame " << frame_present_count << " -> " << path
+              << " (" << width << "x" << height << ")\n";
+}
+
 // Present the current display framebuffer to the host window. Prefers the GPU
 // backend's readback when it produced a frame; otherwise blits guest VRAM via
 // the software path.
@@ -971,6 +995,7 @@ void present_display_frame(psprecomp::Runtime &rt) {
         const GeGpuBackendReport report = ge_gpu_backend_report();
         const std::span<const std::byte> rgba = ge_gpu_backend_game_frame_rgba();
         if (!rgba.empty() && report.offscreen_width != 0u && report.offscreen_height != 0u) {
+            dump_frame_if_requested(rgba, report.offscreen_width, report.offscreen_height);
             display_window_present_rgba(rgba, report.offscreen_width, report.offscreen_height);
             ge_gpu_backend_mark_window_presented();
             return;

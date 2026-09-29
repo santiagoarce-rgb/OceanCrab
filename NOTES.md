@@ -194,3 +194,10 @@ porque iba al stub genérico.)
 ### Nota siguiente
 Tras ~191 frames el main loop cede y el worker de audio (uid 4) queda girando
 en `0x08A09B4C` — siguiente fase: audio (Fase E, sceSasCore/sceAudio ya semi-hechos).
+
+### Tooling de verificación visual
+- `PSPRECOMP_DUMP_FRAME=<dir>`: vuelca los frames presentados (en los counts
+  1, 40, 80, 120, 160, 190) a `<dir>/frame_N.ppm` para inspeccionar el contenido
+  sin display (headless). Confirma que se renderiza contenido real (texto/logos),
+  no solo clear o pantalla negra. Los PNG se derivan con ffmpeg y van en `dumps/`
+  (ignorado por git).
