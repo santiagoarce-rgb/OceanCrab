@@ -335,8 +335,6 @@ static constexpr ImportStub kOtherStubs[] = {
     {"sceAudio", 0x95FD0C2Du}, {"sceAudio", 0xB011922Fu}, {"sceAudio", 0xB7E1D8E7u}, {"sceAudio", 0xCB2E439Eu},
     {"sceAudio", 0xE2D56B2Du},
     {"sceCtrl", 0x1F4011E6u}, {"sceCtrl", 0x1F803938u}, {"sceCtrl", 0x3A622550u},
-    {"sceDisplay", 0x0E20F177u}, {"sceDisplay", 0x289D82FEu}, {"sceDisplay", 0x46F186C3u},
-    {"sceDisplay", 0x984C27E7u}, {"sceDisplay", 0x9C6EAAD7u},
     {"sceImpose", 0x36AA6E91u},
     {"sceNet", 0x0BF0A3AEu}, {"sceNet", 0x281928A9u}, {"sceNet", 0x39AF39A6u},
     {"sceNetAdhoc", 0x6F92741Bu}, {"sceNetAdhoc", 0x7F27BB5Eu}, {"sceNetAdhoc", 0xA62C6F57u},
@@ -1038,6 +1036,10 @@ void register_display_hle(psprecomp::Runtime &rt) {
     rt.register_hle("sceDisplay", 0x46F186C3u, wait_vblank);  // sceDisplayWaitVblankStartCB
     rt.register_hle("sceDisplay", 0x36CDFADEu, wait_vblank);  // sceDisplayWaitVblank
     rt.register_hle("sceDisplay", 0x8EB9EC49u, wait_vblank);  // sceDisplayWaitVblankCB
+    rt.register_hle("sceDisplay", 0x9C6EAAD7u,  // sceDisplayGetVcount
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            ctx.set_gpr(2, static_cast<std::uint32_t>(virtual_time_us / kVblankPeriodUs));
+        });
 }
 
 // TAREA 4 diagnostics: log the first entry to the three hot main-loop PCs so we

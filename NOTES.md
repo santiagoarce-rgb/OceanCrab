@@ -166,3 +166,31 @@ no de código.
    con sync distinto.
 2. Posible fix: presentar desde `sceGeDrawSync`/starvation hook en vez de
    `wait_vblank`, o inicializar `display_state.frame_buffer` a un buffer válido.
+
+## Sesión 2026-09-29 (4) — 🎯 PRIMER FRAME RENDERIZADO
+
+### Causa raíz del display muerto
+`register_other_stubs()` (llamado **después** de `register_display_hle`) incluía
+los 5 NIDs de `sceDisplay` en `kOtherStubs` y los **sobrescribía** con stubs
+genéricos (return 0):
+- `0x0E20F177` SetMode, `0x289D82FE` SetFrameBuf, `0x46F186C3` WaitVblankStartCB,
+  `0x984C27E7` WaitVblankStart, `0x9C6EAAD7` GetVcount.
+
+Como `register_hle` sobreescribe, el handler real de SetFrameBuf/WaitVblank nunca
+se ejecutaba: `display_state.frame_buffer` quedaba en 0 y el present no disparaba.
+(El histograma mostraba `count=4` en SetFrameBuf pero `[display] framebuf` = 0
+porque iba al stub genérico.)
+
+### Fix
+- Quitados los 5 NIDs de `sceDisplay` de `kOtherStubs`.
+- Añadido `sceDisplayGetVcount` (`0x9C6EAAD7`) en `register_display_hle`,
+  devolviendo `virtual_time_us / kVblankPeriodUs` (contador monotónico).
+
+### Resultado
+- `[display] framebuf=0x04000000` ↔ `0x04044000` (doble buffering, 512×272).
+- **191 frames presentados** (`frames=191`), 193 GE draws, pacing vblank
+  (`wait_vblank count=100`), cero errores de rasterizer.
+
+### Nota siguiente
+Tras ~191 frames el main loop cede y el worker de audio (uid 4) queda girando
+en `0x08A09B4C` — siguiente fase: audio (Fase E, sceSasCore/sceAudio ya semi-hechos).

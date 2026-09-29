@@ -30,12 +30,12 @@ Ocean Crab takes the original PSP binary (decrypted by the user) and translates 
 - [x] VBlank + timer scheduling (starvation hook, virtual time)
 - [x] Game runs 10M+ dispatches without errors
 - [x] Configurable dispatch limit (`PSPRECOMP_MAX_DISPATCHES`, default 4B)
-- [ ] Verify rendering (Vulkan frames present)
-- [ ] HLE: IoFileMgr + ModuleMgr (Fase C — asset loading)
+- [x] Verify rendering (191 frames presented, double buffering)
+- [x] HLE: IoFileMgr open/read/close/write/getstat (Fase C)
 - [x] HLE: sceGe_user display-list command walker + present wiring (Fase D)
 - [ ] HLE: sceCtrl (input) (Fase D)
 - [ ] HLE: sceAudio (PCM output) (Fase E)
-- [ ] **First frame rendered** 🎯
+- [x] **First frame rendered** 🎯
 
 ## Technical Highlights
 
@@ -208,7 +208,7 @@ See `docs/ARCHITECTURE.md` for details.
 | C | ⏳ Next | Verify rendering; IoFileMgr + ModuleMgr (asset loading) |
 | D | ⏳ | sceGe_user (display lists → Vulkan) + sceCtrl |
 | E | ⏳ | sceAudio + sceSasCore (PCM playback) |
-| F | 🎯 | **First frame rendered** |
+| F | ✅ Done | **First frame rendered** |
 
 ## Contributing
 
