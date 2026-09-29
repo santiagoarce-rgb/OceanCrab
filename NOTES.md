@@ -253,3 +253,29 @@ En `collect_initial_seeds`:
 ### Nota
 Regenerar el corpus + recompilar las 20 units lleva ~1 h (units de ~3.4 MB con
 -O2). Es un costo único por cambio en `program_analysis.cpp`.
+
+## Sesión 2026-09-29 (7) — "problem reading the disc" (estado UMD)
+
+### Síntoma
+El juego mostraba su pantalla de error **"there was a problem reading the disc,
+press any button to try again"**, con el font del juego (¡el text rendering
+funciona perfecto!). NO es crash: es el error handling del propio engine.
+
+### Causa raíz
+`sceUmdGetDriveStat` devolvía `2` (solo "media presente", sin bit de "ready"), y
+`sceUmdCheckMedium` devolvía `0` (stub genérico). El juego lo interpretaba como
+"disco no listo" y mostraba el error.
+
+### Fix
+- `sceUmdGetDriveStat` (0x6B4A146C) → devuelve `0x32` (media + ready + reading),
+  igual que VCS.
+- `sceUmdCheckMedium` (0x46EBB729) → devuelve `1` (igual que VCS).
+
+### Resultado
+El juego avanza más (1712 frames) y el contenido evoluciona (loading → pantalla
+con logo naranja + azul claro #73BDFF). El error de disco ya no bloquea.
+
+### Próximo paso
+`sceCtrl` (input): la pantalla de error pide "press any button", y el juego en
+general necesita input. Los stubs de sceCtrl (0x1F4011E6, 0x1F803938, 0x3A622550)
+devuelven 0.

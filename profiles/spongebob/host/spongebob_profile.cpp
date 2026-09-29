@@ -378,8 +378,10 @@ void register_other_stubs(psprecomp::Runtime &rt) {
     // (state 2) with a 100 ms delay in between. Returning 0 (the generic stub)
     // made that poll spin forever. Report the disc as inserted so the boot can
     // advance past the UMD wait.
-    rt.register_hle("sceUmdUser", 0x6B4A146Cu,
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 2u); });
+    rt.register_hle("sceUmdUser", 0x6B4A146Cu,  // sceUmdGetDriveStat
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0x32u); });
+    rt.register_hle("sceUmdUser", 0x46EBB729u,  // sceUmdCheckMedium
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 1u); });
 
     // sceIoGetstat: the boot polls this 444k times while the asset loader waits
     // for files. The generic stub returned 0 with an uninitialised SceIoStat, so
@@ -978,7 +980,7 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
 void dump_frame_if_requested(std::span<const std::byte> rgba, std::uint32_t width, std::uint32_t height) {
     const char *dir = std::getenv("PSPRECOMP_DUMP_FRAME");
     if (dir == nullptr || dir[0] == '\0') return;
-    static const std::uint64_t kTargets[] = {1u, 40u, 80u, 120u, 160u, 190u};
+    static const std::uint64_t kTargets[] = {1u, 40u, 80u, 120u, 160u, 190u, 400u, 800u, 1200u, 1600u};
     bool dump = false;
     for (const std::uint64_t target : kTargets) {
         if (frame_present_count == target) { dump = true; break; }
