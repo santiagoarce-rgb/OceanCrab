@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
@@ -56,8 +57,16 @@ struct GeListTable {
     std::vector<std::uint32_t> queue;
 };
 
+// Host-backed file handles for the minimal IoFileMgr (Fase C). Each fd maps to a
+// std::fstream open against the extracted game assets.
+struct FileTable {
+    std::int32_t next_fd{3};
+    std::unordered_map<std::int32_t, std::fstream> files;
+};
+
 GeState ge_state{};
 GeListTable ge_list_table{};
+FileTable file_table{};
 
 constexpr std::uint32_t kEdramBase = 0x04000000u;  // PSP VRAM base.
 constexpr std::uint32_t kEdramSize = 0x00200000u;  // 2 MB.
@@ -395,6 +404,66 @@ void register_other_stubs(psprecomp::Runtime &rt) {
             } catch (...) {
                 ctx.set_gpr(2, 0x80010002u);  // ENOENT
             }
+        });
+
+    // sceIoOpen: open a host file for the guest and hand back a real fd.
+    rt.register_hle("IoFileMgrForUser", 0x109F50BCu,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const std::string path = rt.memory().read_c_string(ctx.gpr[4]);
+            const std::uint32_t flags = ctx.gpr[5];
+            std::ios::openmode mode = std::ios::binary;
+            const bool read = (flags & 0x0001u) != 0u || (flags & 0x0004u) != 0u;
+            const bool write = (flags & 0x0002u) != 0u || (flags & 0x0004u) != 0u ||
+                               (flags & 0x0008u) != 0u;
+            if (read) mode |= std::ios::in;
+            if (write) mode |= std::ios::out;
+            try {
+                const std::filesystem::path native = rt.translate_path(path);
+                std::fstream stream(native, mode);
+                if (!stream) { ctx.set_gpr(2, 0x80010002u); return; }  // ENOENT
+                const std::int32_t fd = file_table.next_fd++;
+                file_table.files.emplace(fd, std::move(stream));
+                ctx.set_gpr(2, static_cast<std::uint32_t>(fd));
+            } catch (...) {
+                ctx.set_gpr(2, 0x80010002u);  // ENOENT
+            }
+        });
+
+    // sceIoRead: copy bytes from a host file into guest memory.
+    rt.register_hle("IoFileMgrForUser", 0x6A638D83u,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const std::int32_t fd = static_cast<std::int32_t>(ctx.gpr[4]);
+            const std::uint32_t dst = ctx.gpr[5];
+            const std::uint32_t size = ctx.gpr[6];
+            const auto it = file_table.files.find(fd);
+            if (it == file_table.files.end()) { ctx.set_gpr(2, 0x80010009u); return; }  // EBADF
+            std::uint8_t *guest = rt.memory().raw_pointer(dst, size);
+            if (guest == nullptr) { ctx.set_gpr(2, 0x80010009u); return; }
+            it->second.read(reinterpret_cast<char *>(guest), static_cast<std::streamsize>(size));
+            const std::streamsize nread = it->second.gcount();
+            ctx.set_gpr(2, nread >= 0 ? static_cast<std::uint32_t>(nread) : 0u);
+        });
+
+    // sceIoClose: close and drop the host file handle.
+    rt.register_hle("IoFileMgrForUser", 0x810C4BC3u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const std::int32_t fd = static_cast<std::int32_t>(ctx.gpr[4]);
+            const bool closed = file_table.files.erase(fd) == 1u;
+            ctx.set_gpr(2, closed ? 0u : 0x80010009u);  // EBADF
+        });
+
+    // sceIoWrite: copy bytes from guest memory into a host file.
+    rt.register_hle("IoFileMgrForUser", 0x42EC03ACu,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const std::int32_t fd = static_cast<std::int32_t>(ctx.gpr[4]);
+            const std::uint32_t src = ctx.gpr[5];
+            const std::uint32_t size = ctx.gpr[6];
+            const auto it = file_table.files.find(fd);
+            if (it == file_table.files.end()) { ctx.set_gpr(2, 0x80010009u); return; }
+            const std::uint8_t *guest = rt.memory().raw_pointer(src, size);
+            if (guest == nullptr) { ctx.set_gpr(2, 0x80010009u); return; }
+            it->second.write(reinterpret_cast<const char *>(guest), static_cast<std::streamsize>(size));
+            ctx.set_gpr(2, size);
         });
 }
 

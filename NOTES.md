@@ -129,3 +129,40 @@ no de código.
    `profiles/spongebob/original/PSP_GAME/USRDIR/` — mínimo `pkg/fonts.pkg`.
 2. Implementar `sceIoOpen`/`sceIoRead`/`sceIoClose` (Fase C) para que, una vez
    presente el archivo, el loader pueda leerlo y avanzar al render loop.
+
+## Sesión 2026-09-29 (3) — extracción de assets + IoFileMgr mínimo
+
+### Extracción de assets
+- ISO UMD en `/run/media/arce/BIG_GAMES/.../Spongebob_Truth_Or_Square_USA_PSP.iso`
+  (1.4 GB, ISO9660 en sector 16). `bsdtar` no lo lee; usado `pycdlib` (pip) para
+  listar y extraer.
+- Extraído `PSP_GAME/` (1.3 GB, 968 archivos) a `profiles/spongebob/original/`.
+  `USRDIR/{movies,movies_de,moviescom,pkg,sound}` + `SYSDIR` + `PARAM.SFO`.
+- `game_root` por defecto apunta a `out/.../profiles/spongebob/original/...`;
+  creado symlink `out/spongebob-config-test/profiles/spongebob/original` →
+  `profiles/spongebob/original` para que el binario encuentre los assets.
+
+### IoFileMgr mínimo (Fase C)
+- `sceIoOpen` (0x109F50BC), `sceIoRead` (0x6A638D83), `sceIoClose` (0x810C4BC3),
+  `sceIoWrite` (0x42EC03AC) implementados con `std::fstream` + `FileTable`
+  (fd → stream). Port mínimo de VCS.
+
+### Resultado — el juego ya renderiza
+- Carga en orden `fonts.pkg`, `scripts.pkg`, `common.pkg`, `strdb_en.pkg`,
+  `logos.pkg`, ... (los 968 assets).
+- Entra al main loop (uid 2/3/4 conmutando) y **enqueue 598+ display lists GE**
+  (`enqueues=926 draws=926` y subiendo), con `sceGeDrawSync`.
+
+### Bloqueador final para el primer frame → display no se presenta
+- `[frame] frames=0 ... fb=0x00000000`: **`sceDisplaySetFrameBuf` NO se llama**
+  (o con framebuf 0) y **`sceDisplayWaitVblank*` tampoco**. El path de present
+  (`wait_vblank` → `spongebob_profile_tick` → `present_display_frame`) nunca
+  dispara porque `display_state.frame_buffer == 0`.
+
+### Próximo paso
+1. Ver por qué el main loop no llama `SetFrameBuf`/`WaitVblank`: revisar
+   `sceDisplayGetFrameBuf` (0xEEDA2E54) y los 8 NIDs de sceDisplay; quizá el
+   swap de buffer va por callback (`WaitVblankStartCB`) o por `sceDisplaySetFrameBuf`
+   con sync distinto.
+2. Posible fix: presentar desde `sceGeDrawSync`/starvation hook en vez de
+   `wait_vblank`, o inicializar `display_state.frame_buffer` a un buffer válido.
