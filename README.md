@@ -20,13 +20,13 @@ Ocean Crab takes the PSP binary of **SpongeBob's Truth or Square** (`ULUS-10478`
 
 > *Code! Code! Code!* — for cashy.
 
-## 🏆 Status
+##  Status
 
-> ### 🎉 Main Menu reached — first playable build!
+> ###  Main Menu reached — first playable build!
 >
 > The game boots, relocates the EBOOT, runs its main loop and renders the **main menu** with working **audio** and **input**. Story Mode, Credits and Options are fully navigable.
 
-### 🚧 Current blocker: "New Game"
+###  Current blocker: "New Game"
 
 Selecting **New Game** freezes the game. This is the active investigation. Two hypotheses:
 
@@ -35,11 +35,11 @@ Selecting **New Game** freezes the game. This is the active investigation. Two h
 
 Neither is confirmed yet, so this section will be updated as the cause is pinned down.
 
-### 🎬 The "Skip Bik" workaround
+###  The "Skip Bik" workaround
 
 The intro videos (`.bik`) use a Bink decoder that also depends on VFPU. Until VFPU is supported, setting `PSPRECOMP_SKIP_BIK=1` makes the HLE return `ENOENT` when the game tries to open those files, so the game skips them cleanly and goes straight to the menu.
 
-## ✨ Features
+##  Features
 
 | Area | Status | Details |
 |---|:---:|---|
@@ -54,7 +54,7 @@ The intro videos (`.bik`) use a Bink decoder that also depends on VFPU. Until VF
 | **VFPU** | ⏳ | Not translated by the codegen yet |
 | **Intro videos (Bink)** | ⏭️ | Skipped via `PSPRECOMP_SKIP_BIK=1` |
 
-## 🚀 Getting Started
+##  Getting Started
 
 ### Requirements
 
@@ -118,7 +118,7 @@ PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNa
 | `PSPRECOMP_SKIP_BIK=1` | Skip the `.bik` intro videos (the HLE returns `ENOENT`). Needed for now, since the Bink decoder requires VFPU. |
 | `PSPRECOMP_AUDIO=1` | Enable audio output. |
 
-## 🔧 Technical Highlights
+##  Technical Highlights
 
 ### Static recompilation, not emulation
 
@@ -152,7 +152,7 @@ Bringing this game up exposed bugs in the base framework. These fixes are genera
   - an O(N²) string replacement in constant lowering, rewritten as O(N)
 - **Runtime** (`include/psprecomp/runtime.hpp`): `invoke_chained_direct` did not set `ctx.pc` before calling the destination unit, which breaks the "full PC switch" strategy.
 
-## 🏗️ Architecture
+##  Architecture
 
 Ocean Crab has three layers:
 
@@ -162,7 +162,7 @@ Ocean Crab has three layers:
 
 See `docs/ARCHITECTURE.md` for details.
 
-## 🗺️ Roadmap
+##  Roadmap
 
 | Phase | Status | Description |
 |---|:---:|---|
@@ -176,13 +176,13 @@ See `docs/ARCHITECTURE.md` for details.
 | H | 🔜 | Bink video decoding (needs VFPU) |
 | I | 🔜 | Polish, performance, Windows/macOS builds |
 
-## ⚖️ Legal
+##  Legal
 
 This repository **does not** contain any copyrighted game assets, ISOs, or game executables. You must provide your own legally obtained copy of the game and decrypt the EBOOT yourself. The generated AOT corpus is derived from the game binary and is never committed.
 
 *SpongeBob SquarePants and all related properties are trademarks of their respective owners. This is an unofficial fan project for educational and preservation purposes.*
 
-## 🙏 Credits
+##  Credits
 
 Ocean Crab stands on the shoulders of other open-source work. See [THIRD_PARTY.md](THIRD_PARTY.md) for the full list, including:
 
@@ -190,10 +190,10 @@ Ocean Crab stands on the shoulders of other open-source work. See [THIRD_PARTY.m
 - [lcs-recomp](https://github.com/elmasas/lcs-recomp) — Vulkan + SDL2 + SAS host layer
 - [Yakumo](https://github.com/TeamGDB/Yakumo) — reference for a PSP recompilation
 
-## 🤝 Contributing
+##  Contributing
 
 Issues and PRs are welcome, especially around **VFPU translation** in the codegen. The general-purpose fixes in `tools/codegen_main.cpp` and `include/psprecomp/runtime.hpp` should also be upstreamed to PSPRecomp.
 
-## 📄 License
+##  License
 
 MIT. See [LICENSE](LICENSE).
