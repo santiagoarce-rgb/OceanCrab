@@ -69,6 +69,12 @@ GeState ge_state{};
 GeListTable ge_list_table{};
 FileTable file_table{};
 
+// fd -> native path, so the read tracer can flag .bik streaming chunks.
+std::unordered_map<std::int32_t, std::string> file_table_paths;
+
+// Cumulative bytes read per fd (used by the experimental PSPRECOMP_SKIP_BIK hack).
+std::unordered_map<std::int32_t, std::uint64_t> file_table_read_bytes;
+
 // Minimal sceAudio state: one hardware channel per slot (VCS AudioChannelState).
 struct AudioChannelState {
     bool reserved{};
@@ -501,12 +507,32 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                                (flags & 0x0008u) != 0u;
             if (read) mode |= std::ios::in;
             if (write) mode |= std::ios::out;
+
+            // EXPERIMENTAL: PSPRECOMP_SKIP_BIK=1 refuses to open .bik videos so
+            // the game skips the intro movies cleanly (instead of EOF-hanging in
+            // the Bink decoder). Returns ENOENT so the game's video path bails.
+            static const bool skip_bik_open = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
+            if (skip_bik_open && path.size() >= 4u &&
+                (path.compare(path.size() - 4u, 4u, ".bik") == 0 ||
+                 path.compare(path.size() - 4u, 4u, ".BIK") == 0)) {
+                ctx.set_gpr(2, 0x80010002u);  // ENOENT
+                return;
+            }
+
             try {
+                static std::size_t traced = 0u;
                 const std::filesystem::path native = rt.translate_path(path);
                 std::fstream stream(native, mode);
-                if (!stream) { ctx.set_gpr(2, 0x80010002u); return; }  // ENOENT
+                const bool ok = static_cast<bool>(stream);
+                if (traced < 30u) {
+                    ++traced;
+                    std::cerr << "[io] open \"" << path << "\" -> \"" << native.string()
+                              << "\" " << (ok ? "OK" : "FAIL") << "\n";
+                }
+                if (!ok) { ctx.set_gpr(2, 0x80010002u); return; }  // ENOENT
                 const std::int32_t fd = file_table.next_fd++;
                 file_table.files.emplace(fd, std::move(stream));
+                file_table_paths[fd] = native.string();
                 ctx.set_gpr(2, static_cast<std::uint32_t>(fd));
             } catch (...) {
                 ctx.set_gpr(2, 0x80010002u);  // ENOENT
@@ -516,16 +542,92 @@ void register_other_stubs(psprecomp::Runtime &rt) {
     // sceIoRead: copy bytes from a host file into guest memory.
     rt.register_hle("IoFileMgrForUser", 0x6A638D83u,
         [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            static std::size_t traced = 0u;
             const std::int32_t fd = static_cast<std::int32_t>(ctx.gpr[4]);
             const std::uint32_t dst = ctx.gpr[5];
             const std::uint32_t size = ctx.gpr[6];
             const auto it = file_table.files.find(fd);
             if (it == file_table.files.end()) { ctx.set_gpr(2, 0x80010009u); return; }  // EBADF
+            const auto path_it = file_table_paths.find(fd);
+            const bool is_bik = path_it != file_table_paths.end() &&
+                path_it->second.size() >= 4u &&
+                (path_it->second.compare(path_it->second.size() - 4u, 4u, ".bik") == 0 ||
+                 path_it->second.compare(path_it->second.size() - 4u, 4u, ".BIK") == 0);
+
+            // EXPERIMENTAL HACK: PSPRECOMP_SKIP_BIK=1 makes .bik streams report
+            // EOF once ~64 KB have been read, so the intro videos are skipped.
+            // No effect unless the env var is set. Remove once real video works.
+            static const bool skip_bik = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
+            const std::uint64_t already = file_table_read_bytes[fd];
+            if (skip_bik && is_bik && already >= 0x10000u) {
+                // EXPERIMENTAL: the EOF above must also mark the video finished,
+                // otherwise the watcher thread spins forever on the Bink "done"
+                // flag (0x08A8DD9C). Verified via disassembly: uid=3 polls
+                // lw 0xDD9C($s1) ; bne $s1 != -1 after sceKernelDelayThreadCB.
+                rt.memory().store32(0x08A8DD9Cu, 0xFFFFFFFFu);
+                if (traced < 30u) {
+                    ++traced;
+                    std::cerr << "[io] read fd=" << fd << " size=" << size
+                              << " -> 0 [bik skip EOF at " << already << " bytes, flag set]\n";
+                }
+                ctx.set_gpr(2, 0u);  // EOF
+                return;
+            }
+
             std::uint8_t *guest = rt.memory().raw_pointer(dst, size);
             if (guest == nullptr) { ctx.set_gpr(2, 0x80010009u); return; }
             it->second.read(reinterpret_cast<char *>(guest), static_cast<std::streamsize>(size));
             const std::streamsize nread = it->second.gcount();
-            ctx.set_gpr(2, nread >= 0 ? static_cast<std::uint32_t>(nread) : 0u);
+            const std::uint32_t result = nread >= 0 ? static_cast<std::uint32_t>(nread) : 0u;
+            file_table_read_bytes[fd] = already + result;
+            if (traced < 30u || is_bik) {
+                ++traced;
+                std::cerr << "[io] read fd=" << fd << " size=" << size << " -> " << result
+                          << (is_bik ? " [bik chunk]" : "") << "\n";
+            }
+            ctx.set_gpr(2, result);
+        });
+
+    // sceIoLseek (64-bit offset): the Bink decoder seeks through .bik files.
+    rt.register_hle("IoFileMgrForUser", 0x27EB27B8u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            static std::size_t traced = 0u;
+            const auto fd = static_cast<std::int32_t>(ctx.gpr[4]);
+            const std::uint64_t raw_offset = static_cast<std::uint64_t>(ctx.gpr[6]) |
+                (static_cast<std::uint64_t>(ctx.gpr[7]) << 32u);
+            const auto offset = static_cast<std::int64_t>(raw_offset);
+            const auto whence = static_cast<std::int32_t>(ctx.gpr[8]);
+            const auto it = file_table.files.find(fd);
+            if (it == file_table.files.end() || whence < 0 || whence > 2) {
+                if (traced < 30u) { ++traced; std::cerr << "[io] lseek reject fd=" << fd << " whence=" << whence << "\n"; }
+                ctx.set_gpr(2, 0x80010009u);  // EBADF
+                ctx.set_gpr(3, 0xFFFFFFFFu);
+                return;
+            }
+            std::ios_base::seekdir direction = std::ios::beg;
+            if (whence == 1) direction = std::ios::cur;
+            if (whence == 2) direction = std::ios::end;
+            it->second.clear();
+            it->second.seekg(static_cast<std::streamoff>(offset), direction);
+            if (!it->second) {
+                ctx.set_gpr(2, 0x80010016u);  // EINVAL
+                ctx.set_gpr(3, 0xFFFFFFFFu);
+                return;
+            }
+            const auto position = static_cast<std::int64_t>(it->second.tellg());
+            if (position < 0) {
+                ctx.set_gpr(2, 0x80010016u);  // EINVAL
+                ctx.set_gpr(3, 0xFFFFFFFFu);
+                return;
+            }
+            const auto result = static_cast<std::uint64_t>(position);
+            ctx.set_gpr(2, static_cast<std::uint32_t>(result));
+            ctx.set_gpr(3, static_cast<std::uint32_t>(result >> 32u));
+            if (traced < 30u) {
+                ++traced;
+                std::cerr << "[io] lseek fd=" << fd << " offset=" << offset
+                          << " whence=" << whence << " -> " << position << "\n";
+            }
         });
 
     // sceIoClose: close and drop the host file handle.

@@ -37,7 +37,9 @@ BootstrapPaths resolve_bootstrap_paths(int argc, char **argv,
                                        const std::filesystem::path &exe_dir) {
     BootstrapPaths paths;
     paths.eboot = exe_dir / "original" / "ULUS10478_EBOOT.ELF";
-    paths.game_root = exe_dir / "original" / "PSP_GAME" / "USRDIR";
+    // Base containing PSP_GAME/ — translate_path() appends the PSP-relative path,
+    // so "umd0:/PSP_GAME/USRDIR/movies/x.bik" resolves to <root>/PSP_GAME/USRDIR/movies/x.bik.
+    paths.game_root = exe_dir / "original";
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
