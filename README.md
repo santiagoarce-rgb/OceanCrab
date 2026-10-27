@@ -1,233 +1,199 @@
+<div align="center">
+
 # 🦀 Ocean Crab
 
-A native PC static recompilation of **SpongeBob's Truth or Square** for the PlayStation Portable (`ULUS-10478`).
+### SpongeBob SquarePants: Truth or Square — native PC static recompilation (PSP)
 
-Ocean Crab takes the original PSP binary (decrypted by the user) and translates the MIPS Allegrex machine code into native C++ ahead-of-time, producing a standalone executable for Linux, Windows, and macOS — no emulator required.
+*No emulator. No JIT. The PSP's MIPS code, translated to C++ ahead of time.*
+
+![Platform: Linux](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)
+![Language: C++20](https://img.shields.io/badge/C%2B%2B-20-blue?logo=cplusplus&logoColor=white)
+![Graphics: Vulkan](https://img.shields.io/badge/graphics-Vulkan-red?logo=vulkan&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Status: Main Menu](https://img.shields.io/badge/status-main%20menu%20reached-brightgreen)
+
+</div>
+
+---
+
+Ocean Crab takes the PSP binary of **SpongeBob's Truth or Square** (`ULUS-10478`, decrypted by you) and translates its MIPS Allegrex machine code into native C++ **ahead of time**. The result is a standalone executable that runs the game's own code directly on your CPU, with a custom runtime standing in for the PSP's operating system and hardware.
 
 > *Money! Money! Money!* — but for code.
 
-## Status
+## 🏆 Status
 
-> **Active development.** The game boots, relocates the EBOOT (116,565 relocs), loads its assets (968 files), renders frames (1400+ presented with double buffering), mixes audio (sceSasCore + sceAudio with pacing), and runs its **main game loop** with no unsupported instructions, no memory faults, and no crashes. Rendering (GE display-list walker → Vulkan), asset loading (IoFileMgr), and audio are wired end-to-end. Next: sceCtrl (input) and rendering polish.
+> ### 🎉 Main Menu reached — first playable build!
+>
+> The game boots, relocates the EBOOT, runs its main loop and renders the **main menu** with working **audio** and **input**. Story Mode, Credits and Options are fully navigable.
 
-### Progress
+### 🚧 Current blocker: "New Game"
 
-- [x] EBOOT analysis (13,876 functions, 176 imports)
-- [x] Vulkan backend integrated (from [lcs-recomp](https://github.com/elmasas/lcs-recomp), MIT)
-- [x] SDL2 platform (window, input, audio)
-- [x] SAS audio implementation (sceSasCore, 27 imports)
-- [x] CMake Linux build system
-- [x] Profile skeleton (176 imports registered)
-- [x] NID database completion (187 entries)
-- [x] AOT corpus generation (20 units, 56 MB, 118,530 functions)
-- [x] Codegen: jump-table + pointer-reached function detection (no "invalid function entry" gaps)
-- [x] Main runtime + EBOOT loader (relocation + module info + entry call)
-- [x] HLE: SysMem (partition allocator)
-- [x] HLE: ThreadMan (thread switch, context save/restore)
-- [x] HLE: FPL (CreateFpl / TryAllocateFpl / FreeFpl / DeleteFpl)
-- [x] HLE: sceDisplay (VBlank / SetFrameBuf / SetMode)
-- [x] Kernel-syscall handling (`jal 0x00000000` → thread return)
-- [x] Instruction: `madd` / `maddu` / `msub` / `msubu`
-- [x] VBlank + timer scheduling (starvation hook, virtual time)
-- [x] Game runs 10M+ dispatches without errors
-- [x] Configurable dispatch limit (`PSPRECOMP_MAX_DISPATCHES`, default 4B)
-- [x] Verify rendering (1400+ frames presented, double buffering)
-- [x] HLE: IoFileMgr open/read/close/write/getstat (Fase C)
-- [x] HLE: sceGe_user display-list command walker + present wiring (Fase D)
-- [x] HLE: sceCtrl (input → SceCtrlData) (Fase D)
-- [x] HLE: sceAudio (reserve + output + pacing) (Fase E)
-- [x] **First frame rendered** 🎯
+Selecting **New Game** freezes the game. This is the active investigation. Two hypotheses:
 
-## Technical Highlights
+1. **VFPU coverage.** The level's 3D engine likely needs PSP **VFPU** (vector FPU) instructions that the AOT codegen does not translate yet.
+2. **Asset-loading synchronization.** A timing or ordering problem while streaming the level's assets.
 
-### Boot sequence (working)
+Neither is confirmed yet, so this section will be updated as the cause is pinned down.
 
-```
-EBOOT.ELF load → relocation (116,565 relocs, 0 invalid)
-   ↓
-entry 0x08804124 (module_start)
-   ↓
-SysMem: AllocPartitionMemory, GetBlockHeadAddr
-   ↓
-sceKernelSetCompilerVersion, GetSystemTimeLow, GetThreadId
-   ↓
-sceKernelCreateThread (worker thread @ 0x08804238)
-   ↓
-sceKernelStartThread
-   ↓
-sceKernelLoadModule (import stub)
-   ↓
-jal 0x00000000 (thread return syscall) → register_function(0, ...)
-   ↓
-Thread switch → worker thread runs
-   ↓
-Worker: CreateFpl (7 MB heap), TryAllocateFpl, madd-heavy math
-   ↓
-Main game loop (PC cycles: 0x08971930 → 0x08A2C448 → 0x08A08EBC)
-   ↓
-Runs indefinitely (40M+ dispatches, no self-stop)
-```
+### 🎬 The "Skip Bik" workaround
 
-### Codegen fixes (contributed upstream)
+The intro videos (`.bik`) use a Bink decoder that also depends on VFPU. Until VFPU is supported, setting `PSPRECOMP_SKIP_BIK=1` makes the HLE return `ENOENT` when the game tries to open those files, so the game skips them cleanly and goes straight to the menu.
 
-Six bugs were discovered and fixed in `tools/codegen_main.cpp` while building the SpongeBob corpus. They don't trigger with the reference VCS corpus because it uses a different unit strategy:
+## ✨ Features
 
-1. **Infinite loop on `JAL → import-stub`**: `continue` without advancing `pc` → 22 GB of RAM in 22 min
-2. **Non-dense switch route**: missing `local_pc` / `entry_id` declarations
-3. **`emit_target` unit index out of range**: for targets outside the executable range
-4. **Same bug in cross-unit `JAL`** (`direct_unit`)
-5. **VFPU register out of range** in `mtv` / `mfv`: `d.word & 0xFF` → `d.word & 0x7F`
-6. **Missing `madd` / `maddu` / `msub` / `msubu`** (`SPECIAL` funct 0x1C–0x1F): now lowered to 64-bit `acc = (hi << 32) | lo`
+| Area | Status | Details |
+|---|:---:|---|
+| **Boot** | ✅ | EBOOT loading and relocation, `module_start`, worker threads |
+| **Rendering (3D + 2D)** | ✅ | Custom Vulkan backend (display lists → Vulkan), SDL2 window |
+| **Audio** | ✅ | Background music and button sound effects, minimal WAV/SAS decoding |
+| **Input** | ✅ | Keyboard and gamepads through SDL2 (tested with an 8BitDo pad) |
+| **File I/O** | ✅ | `sceIoOpen`, `sceIoRead`, `sceIoLseek` streaming from your game files |
+| **Threading** | ✅ | Virtual scheduler; three game threads (uid 2, 3, 4) switch without deadlocks |
+| **Menus** | ✅ | Main menu, Story Mode, Credits and Options |
+| **Gameplay / levels** | ⏳ | Blocked on "New Game" (see above) |
+| **VFPU** | ⏳ | Not translated by the codegen yet |
+| **Intro videos (Bink)** | ⏭️ | Skipped via `PSPRECOMP_SKIP_BIK=1` |
 
-Additionally, an O(N²) string replacement in the constant lowering pass was rewritten to O(N).
+## 🚀 Getting Started
 
-### Framework fix (runtime.hpp)
-
-`invoke_chained_direct` didn't set `ctx.pc` before calling the destination unit. SpongeBob's generated units use the "full PC switch" strategy (`switch(local_pc)` with `entry_id = 0`) because its labels span more than 8192 slots — unlike VCS's dense table. The fast path assumed `direct_entry_id` was set, leaving `ctx.pc` stale. Fix:
-
-```cpp
-if constexpr (DirectTargetPc != 0u) ctx.pc = DirectTargetPc;
-```
-
-### Thread scheduler
-
-The profile implements a full PSP-style thread system:
-
-- **ThreadTable** with `context`, `state` (Ready / Running / Waiting / Completed), `wake_at_us`
-- **`activate_next_thread`**: FIFO scheduling; if idle, advances `virtual_time_us` to the earliest deadline (mirrors VCS's pattern)
-- **`suspend_for_wakeup`**: saves the suspended context (`pc = gpr[31]`, `v0 = 0`) before switching — without this, threads restart from entry on wake
-- **`sceKernelExitThread`**: completes the current thread and switches (registered as a `jal 0x00000000` target)
-- **`sceKernelDelayThread` / `sceDisplayWaitVblankStart`**: suspend with `wake_at_us`, resumed by the starvation hook
-
-### HLE subsystems implemented
-
-| Library | Functions | Status |
-|---|---|---|
-| `SysMemUserForUser` | 8 | ✅ Partition allocator |
-| `ThreadManForUser` | 10 | ✅ ThreadTable + scheduling |
-| `sceDisplay` | 8 | ✅ VBlank / frame buffer / mode |
-| FPL | 5 | ✅ Fixed pool allocator |
-| `ModuleMgrForUser` | 3 | 🟡 Stubs (return UID) |
-
-## Requirements
+### Requirements
 
 - CMake 3.20+
-- C++20 compiler (GCC 12+, Clang 15+)
+- A C++20 compiler (GCC 12+ or Clang 15+)
+- Ninja
 - Vulkan SDK / `vulkan-devel`
 - SDL2 (`sdl2-compat` on Arch)
-- `glslangValidator` (for shader → SPIR-V compilation)
+- `glslangValidator` (shaders are compiled to SPIR-V at build time)
 
-### Arch Linux
+**Arch Linux**
 
 ```bash
 sudo pacman -S cmake ninja vulkan-devel glslang sdl2-compat spirv-tools
 ```
 
-### Debian / Ubuntu
+**Debian / Ubuntu**
 
 ```bash
 sudo apt install build-essential cmake ninja-build glslang-tools spirv-tools \
     libvulkan-dev vulkan-tools libsdl2-dev
 ```
 
-## Building
+### Build
 
-```bash
-git clone https://github.com/santiagoarce-rgb/OceanCrab.git
-cd OceanCrab
-
-# 1. Generate the AOT corpus from your legally obtained EBOOT
-#    (place it first at profiles/spongebob/original/ULUS10478_EBOOT.ELF)
-cmake -S . -B out/framework -DPSPRECOMP_PROFILE="" -G Ninja
-cmake --build out/framework --target psp_recomp -j$(nproc)
-
-mkdir -p profiles/spongebob/generated
-./out/framework/psp_recomp \
-    profiles/spongebob/original/ULUS10478_EBOOT.ELF \
-    --auto profiles/spongebob/generated \
-    0x08804000 0x20000
-
-# 2. Configure and build SpongeBobNative
-cmake -S . -B out/crab -DPSPRECOMP_PROFILE=spongebob -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build out/crab -j$(nproc)
-```
-
-The AOT corpus is ~56 MB (20 units, ~2.3–3.5 MB each) and is gitignored — each user generates it from their own copy of the game.
-
-## Running
-
-Place your legally obtained decrypted `EBOOT.ELF` in:
+You must provide your own legally obtained, **decrypted** `EBOOT.ELF`. Place it at:
 
 ```
 profiles/spongebob/original/ULUS10478_EBOOT.ELF
 ```
 
-Then run:
+Then generate the AOT corpus from it and build:
 
 ```bash
-# Default dispatch limit (4 billion, like VCS)
-./out/crab/profiles/spongebob/SpongeBobNative
+git clone https://github.com/santiagoarce-rgb/OceanCrab.git
+cd OceanCrab
 
-# Or with a custom limit
-PSPRECOMP_MAX_DISPATCHES=100000000 \
-    ./out/crab/profiles/spongebob/SpongeBobNative
+# 1. Generate the AOT corpus from your own EBOOT
+./out/spongebob-config-test/psp_recomp \
+    profiles/spongebob/original/ULUS10478_EBOOT.ELF \
+    --auto profiles/spongebob/generated \
+    0x08804000 0x20000
+
+# 2. Configure and build
+cmake -S . -B out/crab -DPSPRECOMP_PROFILE=spongebob -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build out/crab -j$(nproc)
 ```
 
-Current output:
+> The `psp_recomp` tool is built as part of the project. If `out/spongebob-config-test/psp_recomp` does not exist yet, build the framework first.
+>
+> The generated corpus (about 56 MB, 20 units) is derived from the game binary, so it is **gitignored**. Every user generates it from their own copy.
 
-```
-[window] shown 960x544 renderer=software
-SpongeBobNative PSP bootstrap
-Executable: .../ULUS10478_EBOOT.ELF
-Entry:      0x08804124
-Relocs:     116565 (invalid 0, unsupported 0)
-Functions:  118531
-Dispatch cap: 4000000000
-[progress] dispatch=10000000 pc=0x08971930
-[progress] dispatch=20000000 pc=0x08A2C448
-[progress] dispatch=30000000 pc=0x08A08EBC
-...
+### Run
+
+```bash
+PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
 ```
 
-## Architecture
+| Variable | Purpose |
+|---|---|
+| `PSPRECOMP_SKIP_BIK=1` | Skip the `.bik` intro videos (the HLE returns `ENOENT`). Needed for now, since the Bink decoder requires VFPU. |
+| `PSPRECOMP_AUDIO=1` | Enable audio output. |
 
-Ocean Crab is built on three layers:
+## 🔧 Technical Highlights
 
-1. **PSPRecomp framework** — MIPS Allegrex decoder, ELF/PRX loader, guest memory, runtime dispatch (reusable, game-neutral)
-2. **Host layer** — Vulkan renderer, SDL2 window/input, SAS audio mixer (adapted from [lcs-recomp](https://github.com/elmasas/lcs-recomp))
-3. **SpongeBob profile** — game-specific HLE, thread scheduler, display-list capture, bootstrap (`profiles/spongebob/`)
+### Static recompilation, not emulation
+
+The codegen decodes the Allegrex binary, discovers **13,876 functions** (about 118,000 once the full corpus is generated), and emits C++ units that are compiled natively. A small runtime provides the PSP side: memory, threads, kernel services and hardware.
+
+### Jump tables and function pointers
+
+Indirect control flow was one of the hardest parts. The codegen now detects **jump tables** and **functions reached through pointers**, so indirect jumps and calls land in the right generated code. SpongeBob's units use a "full PC switch" strategy because their labels span more than 8,192 slots.
+
+### I/O mapping
+
+Game file access goes through an HLE layer (`sceIoOpen` / `sceIoRead` / `sceIoLseek`) that maps the PSP's paths to files on disk, enabling streaming of the game's assets.
+
+### HLE for audio and controls
+
+Audio runs through a minimal WAV/SAS path (music and sound effects), and PSP controller input is mapped to keyboard and SDL2 gamepads.
+
+### Scheduler
+
+A virtual thread scheduler with proper thread lifecycle handling (including `sceKernelWaitThreadEnd` and wake-ups on thread completion) keeps the game's threads switching without deadlocks.
+
+### Upstream-worthy fixes
+
+Bringing this game up exposed bugs in the base framework. These fixes are general-purpose and are intended to go upstream:
+
+- **Codegen** (`tools/codegen_main.cpp`):
+  - infinite loop on `JAL` → import stub (`continue` without advancing `pc`)
+  - non-dense switch route missing `local_pc` / `entry_id` declarations
+  - unit index out of range in `emit_target` and in cross-unit `JAL`
+  - VFPU register out of range in `mtv` / `mfv`
+  - an O(N²) string replacement in constant lowering, rewritten as O(N)
+- **Runtime** (`include/psprecomp/runtime.hpp`): `invoke_chained_direct` did not set `ctx.pc` before calling the destination unit, which breaks the "full PC switch" strategy.
+
+## 🏗️ Architecture
+
+Ocean Crab has three layers:
+
+1. **PSPRecomp framework**: MIPS Allegrex decoder, ELF/PRX loader, guest memory, runtime dispatch (reusable and game-neutral).
+2. **Host layer**: Vulkan renderer, SDL2 window and input, SAS audio mixer (adapted from [lcs-recomp](https://github.com/elmasas/lcs-recomp)).
+3. **SpongeBob profile**: game-specific HLE, display-list capture and bootstrap (`profiles/spongebob/`).
 
 See `docs/ARCHITECTURE.md` for details.
 
-## Roadmap
+## 🗺️ Roadmap
 
 | Phase | Status | Description |
-|-------|--------|-------------|
-| A | ✅ Done | SysMem + ThreadMan + thread switch |
-| B | ✅ Done | VBlank + timer HLE + FPL + `madd` family |
-| B.5 | ✅ Done | Configurable dispatch limit + main loop running |
-| C | ✅ Done | IoFileMgr (open/read/close/write/getstat) — asset loading |
-| D | ✅ Done | sceGe_user (display-list walker + Vulkan) + sceCtrl (input) |
-| E | ✅ Done | sceAudio (reserve + output + pacing) + sceSasCore |
-| F | ✅ Done | **First frame rendered** |
+|---|:---:|---|
+| A | ✅ Done | SysMem + ThreadMan + thread switching |
+| B | ✅ Done | VBlank + timer HLE |
+| C | ✅ Done | I/O (`sceIoOpen`, `sceIoRead`, `sceIoLseek`) |
+| D | ✅ Done | Rendering: display lists → Vulkan, display, controls |
+| E | ✅ Done | Audio (music, SFX, WAV/SAS) |
+| F | ✅ Done | **Main menu rendered and navigable** 🎯 |
+| G | ⏳ Next | **Gameplay / level loading (VFPU support in the codegen)** |
+| H | 🔜 | Bink video decoding (needs VFPU) |
+| I | 🔜 | Polish, performance, Windows/macOS builds |
 
-## Contributing
+## ⚖️ Legal
 
-The framework fixes in `tools/codegen_main.cpp` and `include/psprecomp/runtime.hpp` are general-purpose and apply to any PSP recompilation target that uses the "full PC switch" strategy. They should be upstreamed to [jessicanataliagta/PSPRecomp](https://github.com/jessicanataliagta/PSPRecomp) — PRs welcome.
+This repository **does not** contain any copyrighted game assets, ISOs, or game executables. You must provide your own legally obtained copy of the game and decrypt the EBOOT yourself. The generated AOT corpus is derived from the game binary and is never committed.
 
-Known latent bugs in the reference profiles (not triggered by their current corpora, but present in the code):
+*SpongeBob SquarePants and all related properties are trademarks of their respective owners. This is an unofficial fan project for educational and preservation purposes.*
 
-- `profiles/vcs/tools/vcs_codegen_main.cpp:1133`: same `continue` → `break` bug
-- `profiles/vcs/tools/vcs_codegen_main.cpp`: same `mtv`/`mfv` VFPU mask bug
+## 🙏 Credits
 
-## Legal
+Ocean Crab stands on the shoulders of other open-source work. See [THIRD_PARTY.md](THIRD_PARTY.md) for the full list, including:
 
-This repository **does not** contain any copyrighted game assets, ISOs, or game executables. Users must provide their own legally obtained copy of the game.
+- [PSPRecomp](https://github.com/jessicanataliagta/PSPRecomp) — the recompilation framework
+- [lcs-recomp](https://github.com/elmasas/lcs-recomp) — Vulkan + SDL2 + SAS host layer
+- [Yakumo](https://github.com/TeamGDB/Yakumo) — reference for a PSP recompilation
 
-## Credits
+## 🤝 Contributing
 
-See [THIRD_PARTY.md](THIRD_PARTY.md).
+Issues and PRs are welcome, especially around **VFPU translation** in the codegen. The general-purpose fixes in `tools/codegen_main.cpp` and `include/psprecomp/runtime.hpp` should also be upstreamed to PSPRecomp.
 
-## License
+## 📄 License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
