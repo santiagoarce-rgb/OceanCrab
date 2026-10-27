@@ -18,7 +18,7 @@
 
 Ocean Crab takes the PSP binary of **SpongeBob's Truth or Square** (`ULUS-10478`, decrypted by you) and translates its MIPS Allegrex machine code into native C++ **ahead of time**. The result is a standalone executable that runs the game's own code directly on your CPU, with a custom runtime standing in for the PSP's operating system and hardware.
 
-> *Money! Money! Money!* — but for code.
+> *Code! Code! Code!* — for cashy.
 
 ## 🏆 Status
 
