@@ -75,6 +75,24 @@ std::unordered_map<std::int32_t, std::string> file_table_paths;
 // Cumulative bytes read per fd (used by the experimental PSPRECOMP_SKIP_BIK hack).
 std::unordered_map<std::int32_t, std::uint64_t> file_table_read_bytes;
 
+// Fake 44-byte Bink header served by sceIoRead when PSPRECOMP_SKIP_BIK=1.
+// "BIKi", 0 frames, 0 audio tracks: the Bink decoder reads it, sees nothing to
+// decode, and reports "Movie complete" immediately — without touching VFPU and
+// without the null-pointer crash that ENOENT-on-open caused.
+constexpr std::array<std::uint8_t, 44u> kFakeBikHeader = {
+    0x42u, 0x49u, 0x4Bu, 0x69u,  // "BIKi"
+    0x2Cu, 0x00u, 0x00u, 0x00u,  // file size = 44
+    0x00u, 0x00u, 0x00u, 0x00u,  // frames = 0
+    0x00u, 0x00u, 0x00u, 0x00u,  // largest frame = 0
+    0x00u, 0x00u, 0x00u, 0x00u,  // frames (dup) = 0
+    0xE0u, 0x01u, 0x00u, 0x00u,  // width = 480
+    0x10u, 0x01u, 0x00u, 0x00u,  // height = 272
+    0x1Eu, 0x00u, 0x00u, 0x00u,  // fps numerator = 30
+    0x01u, 0x00u, 0x00u, 0x00u,  // fps denominator = 1
+    0x00u, 0x00u, 0x00u, 0x00u,  // flags = 0
+    0x00u, 0x00u, 0x00u, 0x00u,  // audio tracks = 0
+};
+
 // Minimal sceAudio state: one hardware channel per slot (VCS AudioChannelState).
 struct AudioChannelState {
     bool reserved{};
@@ -508,16 +526,9 @@ void register_other_stubs(psprecomp::Runtime &rt) {
             if (read) mode |= std::ios::in;
             if (write) mode |= std::ios::out;
 
-            // EXPERIMENTAL: PSPRECOMP_SKIP_BIK=1 refuses to open .bik videos so
-            // the game skips the intro movies cleanly (instead of EOF-hanging in
-            // the Bink decoder). Returns ENOENT so the game's video path bails.
-            static const bool skip_bik_open = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
-            if (skip_bik_open && path.size() >= 4u &&
-                (path.compare(path.size() - 4u, 4u, ".bik") == 0 ||
-                 path.compare(path.size() - 4u, 4u, ".BIK") == 0)) {
-                ctx.set_gpr(2, 0x80010002u);  // ENOENT
-                return;
-            }
+            // PSPRECOMP_SKIP_BIK now serves a fake 44-byte "0 frames" Bink header
+            // from sceIoRead instead of refusing the open (which crashed the
+            // Movie system with a null pointer). See kFakeBikHeader.
 
             try {
                 static std::size_t traced = 0u;
@@ -554,33 +565,34 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                 (path_it->second.compare(path_it->second.size() - 4u, 4u, ".bik") == 0 ||
                  path_it->second.compare(path_it->second.size() - 4u, 4u, ".BIK") == 0);
 
-            // EXPERIMENTAL HACK: PSPRECOMP_SKIP_BIK=1 makes .bik streams report
-            // EOF once ~64 KB have been read, so the intro videos are skipped.
-            // No effect unless the env var is set. Remove once real video works.
+            std::uint8_t *guest = rt.memory().raw_pointer(dst, size);
+            if (guest == nullptr) { ctx.set_gpr(2, 0x80010009u); return; }  // EBADF
+
+            // Fake Bink: serve the 44-byte "0 frames" header, then report EOF.
             static const bool skip_bik = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
-            const std::uint64_t already = file_table_read_bytes[fd];
-            if (skip_bik && is_bik && already >= 0x10000u) {
-                // EXPERIMENTAL: the EOF above must also mark the video finished,
-                // otherwise the watcher thread spins forever on the Bink "done"
-                // flag (0x08A8DD9C). Verified via disassembly: uid=3 polls
-                // lw 0xDD9C($s1) ; bne $s1 != -1 after sceKernelDelayThreadCB.
-                rt.memory().store32(0x08A8DD9Cu, 0xFFFFFFFFu);
+            if (skip_bik && is_bik) {
+                const std::uint64_t offset = file_table_read_bytes[fd];
+                if (offset < kFakeBikHeader.size()) {
+                    const std::uint64_t remaining = kFakeBikHeader.size() - offset;
+                    const std::uint32_t n = size < remaining ? size
+                        : static_cast<std::uint32_t>(remaining);
+                    for (std::uint32_t i = 0u; i < n; ++i) guest[i] = kFakeBikHeader[offset + i];
+                    file_table_read_bytes[fd] = offset + n;
+                    ctx.set_gpr(2, n);
+                    return;
+                }
                 if (traced < 30u) {
                     ++traced;
-                    std::cerr << "[io] read fd=" << fd << " size=" << size
-                              << " -> 0 [bik skip EOF at " << already << " bytes, flag set]\n";
+                    std::cerr << "[io] read fd=" << fd << " [bik fake EOF]\n";
                 }
-                ctx.set_gpr(2, 0u);  // EOF
+                ctx.set_gpr(2, 0u);  // EOF after the fake header
                 return;
             }
 
-            std::uint8_t *guest = rt.memory().raw_pointer(dst, size);
-            if (guest == nullptr) { ctx.set_gpr(2, 0x80010009u); return; }
             it->second.read(reinterpret_cast<char *>(guest), static_cast<std::streamsize>(size));
             const std::streamsize nread = it->second.gcount();
             const std::uint32_t result = nread >= 0 ? static_cast<std::uint32_t>(nread) : 0u;
-            file_table_read_bytes[fd] = already + result;
-            if (traced < 30u || is_bik) {
+            if (traced < 30u) {
                 ++traced;
                 std::cerr << "[io] read fd=" << fd << " size=" << size << " -> " << result
                           << (is_bik ? " [bik chunk]" : "") << "\n";
@@ -604,6 +616,30 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                 ctx.set_gpr(3, 0xFFFFFFFFu);
                 return;
             }
+            // Fake Bink: seeks stay within the 44-byte synthetic header.
+            const auto path_it = file_table_paths.find(fd);
+            const bool is_bik = path_it != file_table_paths.end() &&
+                path_it->second.size() >= 4u &&
+                (path_it->second.compare(path_it->second.size() - 4u, 4u, ".bik") == 0 ||
+                 path_it->second.compare(path_it->second.size() - 4u, 4u, ".BIK") == 0);
+            static const bool skip_bik = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
+            if (skip_bik && is_bik) {
+                std::int64_t base = 0;
+                if (whence == 1) base = static_cast<std::int64_t>(file_table_read_bytes[fd]);
+                else if (whence == 2) base = static_cast<std::int64_t>(kFakeBikHeader.size());
+                else if (whence != 0) { ctx.set_gpr(2, 0x80010016u); ctx.set_gpr(3, 0xFFFFFFFFu); return; }
+                const std::int64_t pos = base + offset;
+                if (pos < 0 || pos > static_cast<std::int64_t>(kFakeBikHeader.size())) {
+                    ctx.set_gpr(2, 0x80010016u);  // EINVAL
+                    ctx.set_gpr(3, 0xFFFFFFFFu);
+                    return;
+                }
+                file_table_read_bytes[fd] = static_cast<std::uint64_t>(pos);
+                ctx.set_gpr(2, static_cast<std::uint32_t>(pos));
+                ctx.set_gpr(3, 0u);
+                return;
+            }
+
             std::ios_base::seekdir direction = std::ios::beg;
             if (whence == 1) direction = std::ios::cur;
             if (whence == 2) direction = std::ios::end;
