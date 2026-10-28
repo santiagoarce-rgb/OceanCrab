@@ -1417,6 +1417,43 @@ void log_main_loop_entries(psprecomp::Runtime &, psprecomp::AllegrexContext &,
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+// Fake "Movie complete" hook (experimental, gated by PSPRECOMP_SKIP_BIK).
+//
+// The cutscene (movies/mainintro.bik) goes through the Bink SDK, which rejects
+// the synthetic header and returns null, so sub_08943694 (the Movie-manager
+// accessor) dereferences null at 0x08943728. We replace sub_08943694 with a
+// native stub that returns a zero-initialised fake Movie object in guest RAM.
+// That object's field0 points to a fake vtable whose vtable[4] method reports
+// "complete" (returns 0). No effect unless PSPRECOMP_SKIP_BIK is set.
+// ---------------------------------------------------------------------------
+constexpr std::uint32_t kFakeMovieObject = 0x09E00000u;   // 256 bytes, zeroed.
+constexpr std::uint32_t kFakeMovieVtable = 0x09E00100u;   // 32 bytes.
+constexpr std::uint32_t kFakeMovieMethod = 0x09E00200u;   // native method addr.
+
+void fake_movie_method(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+    ctx.set_gpr(2, 0u);  // "complete" / no-op.
+}
+
+void register_movie_skip(psprecomp::Runtime &rt) {
+    if (std::getenv("PSPRECOMP_SKIP_BIK") == nullptr) return;
+
+    rt.memory().zero(kFakeMovieObject, 256u);
+    rt.memory().zero(kFakeMovieVtable, 32u);
+    rt.memory().store32(kFakeMovieObject + 0u, kFakeMovieVtable);   // field0 = vtable.
+    rt.memory().store32(kFakeMovieVtable + 16u, kFakeMovieMethod);  // vtable[4] = method.
+
+    rt.register_function(kFakeMovieMethod, &fake_movie_method, "fake_movie_method");
+    rt.register_function(0x08943694u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            ctx.set_gpr(2, kFakeMovieObject);
+        },
+        "movie_manager_skip");
+
+    std::cerr << "[movie] skip hooked: fake object 0x" << std::hex << kFakeMovieObject
+              << std::dec << "\n";
+}
+
 void install_spongebob_profile(psprecomp::Runtime &rt) {
     // Registrar module_start como uid 1 (por si acaso).  En el PSP real el
     // module_start es un thread del kernel; aquí no estaba en la tabla, así que
@@ -1465,6 +1502,8 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
             ctx.set_gpr(2, 0u);
         });
+
+    register_movie_skip(rt);  // Fake Movie object — skips the cutscene (PSPRECOMP_SKIP_BIK).
 
     // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
     // syscall, syscall 0) jumps to guest address 0. Map it to the thread
