@@ -1454,6 +1454,29 @@ void register_movie_skip(psprecomp::Runtime &rt) {
               << std::dec << "\n";
 }
 
+// ---------------------------------------------------------------------------
+// Fake "menu background missing" skip (gated by PSPRECOMP_SKIP_BIK).
+//
+// The main menu animates a background layer list stored at obj+0x180. That list
+// is populated from disc0:/PSP_GAME/USRDIR/menu_bkg.pvs, a loose UMD file that
+// is absent from the extracted assets (the menu_bkg meshes actually live inside
+// mm.pkg as menu_bkg.mnf + menu_bkg_*.msh, not as menu_bkg.pvs). sceIoGetstat
+// therefore returns ENOENT, the list stays null, and sub_08943060 dereferences
+// null at 0x08943080. Replace the accessor with a stub that returns 0; the
+// callers ignore v0.
+// ---------------------------------------------------------------------------
+void register_menu_bg_skip(psprecomp::Runtime &rt) {
+    if (std::getenv("PSPRECOMP_SKIP_BIK") == nullptr) return;
+
+    rt.register_function(0x08943060u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            ctx.set_gpr(2, 0u);  // skip the background-layer update entirely.
+        },
+        "menu_bg_skip");
+
+    std::cerr << "[menu] skip hooked: sub_08943060 -> 0 (menu_bkg.pvs missing)\n";
+}
+
 void install_spongebob_profile(psprecomp::Runtime &rt) {
     // Registrar module_start como uid 1 (por si acaso).  En el PSP real el
     // module_start es un thread del kernel; aquí no estaba en la tabla, así que
@@ -1503,7 +1526,8 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
             ctx.set_gpr(2, 0u);
         });
 
-    register_movie_skip(rt);  // Fake Movie object — skips the cutscene (PSPRECOMP_SKIP_BIK).
+    register_movie_skip(rt);    // Fake Movie object — skips the cutscene (PSPRECOMP_SKIP_BIK).
+    register_menu_bg_skip(rt);  // Fake menu background skip — menu_bkg.pvs is missing.
 
     // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
     // syscall, syscall 0) jumps to guest address 0. Map it to the thread
