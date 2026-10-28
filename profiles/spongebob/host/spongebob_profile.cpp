@@ -82,9 +82,9 @@ std::unordered_map<std::int32_t, std::uint64_t> file_table_read_bytes;
 constexpr std::array<std::uint8_t, 44u> kFakeBikHeader = {
     0x42u, 0x49u, 0x4Bu, 0x69u,  // "BIKi"
     0x2Cu, 0x00u, 0x00u, 0x00u,  // file size = 44
-    0x00u, 0x00u, 0x00u, 0x00u,  // frames = 0
+    0x01u, 0x00u, 0x00u, 0x00u,  // frames = 1 (Plan B: avoid strict 0-frame rejection)
     0x00u, 0x00u, 0x00u, 0x00u,  // largest frame = 0
-    0x00u, 0x00u, 0x00u, 0x00u,  // frames (dup) = 0
+    0x01u, 0x00u, 0x00u, 0x00u,  // frames (dup) = 1
     0xE0u, 0x01u, 0x00u, 0x00u,  // width = 480
     0x10u, 0x01u, 0x00u, 0x00u,  // height = 272
     0x1Eu, 0x00u, 0x00u, 0x00u,  // fps numerator = 30
@@ -504,8 +504,18 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                 rt.memory().zero(stat_address, 0x58u);
                 rt.memory().store32(stat_address + 0x00u, (directory ? 0x1000u : 0x2000u) | 0x01FFu);
                 rt.memory().store32(stat_address + 0x04u, directory ? 0x0010u : 0x0020u);
-                const std::uint64_t size = regular
+                static const bool skip_bik = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
+                const bool is_bik = path.size() >= 4u &&
+                    (path.compare(path.size() - 4u, 4u, ".bik") == 0 ||
+                     path.compare(path.size() - 4u, 4u, ".BIK") == 0);
+                std::uint64_t size = regular
                     ? static_cast<std::uint64_t>(std::filesystem::file_size(native, error)) : 0u;
+                if (skip_bik && is_bik) {
+                    // Fake Bink: report st_size = 44 (the synthetic header size)
+                    // so BinkOpen's size check accepts the file.
+                    size = static_cast<std::uint64_t>(kFakeBikHeader.size());
+                    std::cerr << "[io] getstat bik \"" << path << "\" -> size=" << size << "\n";
+                }
                 rt.memory().store32(stat_address + 0x08u, static_cast<std::uint32_t>(size));
                 rt.memory().store32(stat_address + 0x0Cu, static_cast<std::uint32_t>(size >> 32u));
                 ctx.set_gpr(2, 0u);
@@ -635,6 +645,8 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                     return;
                 }
                 file_table_read_bytes[fd] = static_cast<std::uint64_t>(pos);
+                std::cerr << "[io] lseek bik fd=" << fd << " offset=" << offset
+                          << " whence=" << whence << " -> " << pos << "\n";
                 ctx.set_gpr(2, static_cast<std::uint32_t>(pos));
                 ctx.set_gpr(3, 0u);
                 return;
