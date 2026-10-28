@@ -1441,6 +1441,31 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
     register_other_stubs(rt);    // everything else (IoFileMgrForUser, ...).
     register_audio_hle(rt);      // sceAudio (reserve + output + pacing) — Fase E.
 
+    // Fake Memory Stick: make the save-data (checkpoint) dialog finish
+    // instantly so the game initializes its save-data heap instead of treating
+    // the stick as "not inserted" (which left the heap pointer 0x08A8268C null
+    // and crashed "new" at 0x0898CF60). Overrides the generic return-0 stubs
+    // registered above (register_hle overwrites).
+    rt.register_hle("sceUtility", 0x8874DBE0u,  // sceUtilitySavedataGetStatus
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            std::cerr << "[savedata] GetStatus -> 4 (FINISHED, fake)\n";
+            ctx.set_gpr(2, 4u);  // PSP_UTILITY_DIALOG_FINISHED
+        });
+    rt.register_hle("sceUtility", 0x50C4CD57u,  // sceUtilitySavedataInitStart
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            std::cerr << "[savedata] InitStart -> 0 (fake)\n";
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceUtility", 0x9790B33Cu,  // sceUtilitySavedataShutdownStart
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            std::cerr << "[savedata] ShutdownStart -> 0 (fake)\n";
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceUtility", 0xD4B95FFBu,  // sceUtilitySavedataUpdate
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            ctx.set_gpr(2, 0u);
+        });
+
     // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
     // syscall, syscall 0) jumps to guest address 0. Map it to the thread
     // completion handler so the module_start thread can hand off to the worker
