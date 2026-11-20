@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" width="1280" height="360" role="img" aria-labelledby="t d">
+  <title id="t">Ocean Crab</title>
+  <desc id="d">Ocean Crab — native PC static recompilation of a PSP game</desc>
+  <defs>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b3d5c"/>
+      <stop offset="0.55" stop-color="#072a44"/>
+      <stop offset="1" stop-color="#03162a"/>
+    </linearGradient>
+    <linearGradient id="ray" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bfe9ff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#bfe9ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff7a59"/>
+      <stop offset="1" stop-color="#e2412b"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#9fe3ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="360" fill="url(#sea)"/>
+
+  <!-- light rays -->
+  <g>
+    <polygon points="140,0 230,0 120,360 -40,360" fill="url(#ray)"/>
+    <polygon points="420,0 470,0 430,360 310,360" fill="url(#ray)" opacity="0.7"/>
+    <polygon points="900,0 980,0 1120,360 960,360" fill="url(#ray)" opacity="0.8"/>
+    <polygon points="1160,0 1200,0 1290,360 1210,360" fill="url(#ray)" opacity="0.6"/>
+  </g>
+
+  <!-- bubbles -->
+  <g fill="none" stroke="#bfe9ff" stroke-opacity="0.45" stroke-width="2">
+    <circle cx="1190" cy="120" r="9"/>
+    <circle cx="1212" cy="92" r="5"/>
+    <circle cx="1178" cy="158" r="4"/>
+    <circle cx="210" cy="90" r="7"/>
+    <circle cx="228" cy="58" r="4"/>
+    <circle cx="610" cy="40" r="3"/>
+  </g>
+
+  <!-- binary drift -->
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#7fd0ff" fill-opacity="0.18">
+    <text x="760" y="52">27BDFFF0 AFBF0004 AFB00000 0E253939</text>
+    <text x="820" y="76">00808021 3C0208A8 24429BC8 AE020000</text>
+    <text x="40" y="330">lw $v0, 0($a0)  ·  jal 0x089C4998  ·  jr $ra</text>
+  </g>
+
+  <!-- sea floor -->
+  <path d="M0 300 C 160 280, 320 318, 480 300 S 800 284, 960 302 S 1180 316, 1280 296 L1280 360 L0 360 Z" fill="#021022"/>
+  <path d="M0 322 C 200 306, 380 338, 600 322 S 980 308, 1280 326 L1280 360 L0 360 Z" fill="#010a17"/>
+
+  <!-- crab -->
+  <g transform="translate(250 205)">
+    <!-- legs -->
+    <g stroke="#c9352a" stroke-width="9" stroke-linecap="round" fill="none">
+      <path d="M-48 18 L-92 36 L-104 70"/>
+      <path d="M-40 30 L-78 58 L-84 90"/>
+      <path d="M-28 38 L-58 72 L-58 100"/>
+      <path d="M48 18 L92 36 L104 70"/>
+      <path d="M40 30 L78 58 L84 90"/>
+      <path d="M28 38 L58 72 L58 100"/>
+    </g>
+    <!-- arms + claws -->
+    <g stroke="#e2412b" stroke-width="11" stroke-linecap="round" fill="none">
+      <path d="M-58 -6 L-96 -38 L-104 -70"/>
+      <path d="M58 -6 L96 -38 L104 -70"/>
+    </g>
+    <g fill="url(#shell)">
+      <path d="M-104 -70 m-30 -8 a32 28 0 1 0 60 -6 l-22 10 Z"/>
+      <path d="M104 -70 m30 -8 a32 28 0 1 1 -60 -6 l22 10 Z"/>
+    </g>
+    <!-- body -->
+    <ellipse cx="0" cy="10" rx="78" ry="50" fill="url(#shell)"/>
+    <ellipse cx="0" cy="-6" rx="54" ry="20" fill="#ffffff" fill-opacity="0.12"/>
+    <!-- eyes -->
+    <g stroke="#c9352a" stroke-width="6" stroke-linecap="round">
+      <line x1="-20" y1="-34" x2="-24" y2="-62"/>
+      <line x1="20" y1="-34" x2="24" y2="-62"/>
+    </g>
+    <circle cx="-24" cy="-68" r="13" fill="#fff"/>
+    <circle cx="24" cy="-68" r="13" fill="#fff"/>
+    <circle cx="-21" cy="-66" r="6" fill="#0b1b2b"/>
+    <circle cx="27" cy="-66" r="6" fill="#0b1b2b"/>
+    <!-- </> mark on shell -->
+    <text x="0" y="26" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="30" font-weight="700" fill="#ffffff" fill-opacity="0.85">&lt;/&gt;</text>
+  </g>
+
+  <!-- title -->
+  <g font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
+    <text x="440" y="178" font-size="96" font-weight="800" letter-spacing="2" fill="url(#title)">OCEAN CRAB</text>
+    <text x="444" y="226" font-size="26" font-weight="500" fill="#bfe9ff" fill-opacity="0.9">Native PC static recompilation of a PSP classic</text>
+    <text x="444" y="262" font-size="18" font-weight="600" letter-spacing="3" fill="#7fd0ff" fill-opacity="0.75">NO EMULATOR · NO JIT · MIPS → C++ AHEAD OF TIME</text>
+  </g>
+</svg>
