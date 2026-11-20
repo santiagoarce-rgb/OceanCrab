@@ -96,6 +96,10 @@ public:
 
     void unsupported(std::uint32_t pc, std::uint32_t instruction, const std::string &reason);
     void arithmetic_overflow(std::uint32_t pc, std::uint32_t instruction);
+    // Called by generated jr/jalr code when the computed target is 0 (a null
+    // function pointer / vtable slot). Dumps the caller context and stops so
+    // the offending indirect-jump site can be identified from the log.
+    void null_indirect_jump(AllegrexContext &ctx, std::uint32_t pc, std::uint32_t source_reg);
     void invoke_import(std::string_view library, std::uint32_t nid, AllegrexContext &ctx);
     // Generated import wrappers have a stable numeric slot. Resolve the
     // library/NID hash maps only on the first call, then invoke the bound HLE

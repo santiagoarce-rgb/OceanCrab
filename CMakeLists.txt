@@ -24,6 +24,20 @@ option(PSPRECOMP_AOT_ASSUME_NO_WRITE_WATCH
     "Remove per-store write-watch branch from production AOT fast memory" OFF)
 option(PSPRECOMP_AOT_PRODUCTION_FASTPATHS
     "Compile out AOT chain diagnostic/counter branches for production builds" OFF)
+
+# Instrument generated jr/jalr to trap null-target calls with a full register
+# dump. Defaults ON for debug builds (diagnostics) and OFF otherwise, so an
+# optimized upstream build is unaffected unless explicitly enabled.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(PSPRECOMP_NULL_JUMP_CHECK_DEFAULT ON)
+else()
+    set(PSPRECOMP_NULL_JUMP_CHECK_DEFAULT OFF)
+endif()
+option(PSPRECOMP_NULL_JUMP_CHECK
+    "Trap null-target jr/jalr in generated code (default ON in Debug)" ${PSPRECOMP_NULL_JUMP_CHECK_DEFAULT})
+if(PSPRECOMP_NULL_JUMP_CHECK)
+    add_compile_definitions(PSPRECOMP_NULL_JUMP_CHECK=1)
+endif()
 set(PSPRECOMP_MSVC_CGTHREADS "0" CACHE STRING
     "MSVC LTCG code-generation threads (0 = compiler default)")
 if(NOT PSPRECOMP_MSVC_CGTHREADS MATCHES "^[0-9]+$")

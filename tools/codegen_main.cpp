@@ -1114,6 +1114,18 @@ std::string emit_function_source(const GeneratedFunctionInput &function,
                 } else {
                     const std::uint32_t link = decoded.rd == 0u ? 31u : decoded.rd;
                     body << "    jump_target = " << reg(decoded.rs) << ";\n";
+                    // `jr $ra` (return) legitimately lands on 0 when a PSP thread
+                    // entry was entered with ra=0 (return-to-kernel). Only trap
+                    // null CALLs and null jumps through a non-ra register.
+                    const bool trap_null_jump =
+                        decoded.kind == psprecomp::OpcodeKind::Jalr ||
+                        (decoded.kind == psprecomp::OpcodeKind::Jr && decoded.rs != 31u);
+                    if (trap_null_jump) {
+                        body << "#if defined(PSPRECOMP_NULL_JUMP_CHECK)\n"
+                             << "    if (jump_target == 0u) { rt.null_indirect_jump(ctx, " << psprecomp::hex32(pc)
+                             << "u, " << decoded.rs << "u); return; }\n"
+                             << "#endif\n";
+                    }
                     if (decoded.kind == psprecomp::OpcodeKind::Jalr) {
                         body << "    ctx.set_gpr(" << link << ", " << psprecomp::hex32(pc + 8u) << "u);\n";
                     }

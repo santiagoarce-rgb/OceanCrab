@@ -657,7 +657,10 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
             RecompiledFunction function = lookup_generated_unit(before);
             if (function == nullptr) function = lookup_function(before);
             if (function == nullptr) {
-                stop("No recompiled function registered at " + hex32(before));
+                std::ostringstream message;
+                message << "Unknown destination: no recompiled function registered at " << hex32(before);
+                append_gpr_dump(message, cpu_);
+                stop(message.str());
                 break;
             }
             g_runtime_dispatch_pc = before;
@@ -1100,6 +1103,14 @@ void Runtime::unsupported(std::uint32_t pc, std::uint32_t instruction, const std
 
 void Runtime::arithmetic_overflow(std::uint32_t pc, std::uint32_t instruction) {
     stop("Allegrex arithmetic overflow for " + hex32(instruction) + " at " + hex32(pc));
+}
+
+void Runtime::null_indirect_jump(AllegrexContext &ctx, std::uint32_t pc, std::uint32_t source_reg) {
+    std::ostringstream message;
+    message << "Indirect jump to null (jr/jalr target 0) at " << hex32(pc)
+            << " source reg $" << source_reg;
+    append_gpr_dump(message, ctx);
+    stop(message.str());
 }
 
 void Runtime::register_native_fast_path(std::uint32_t address, NativeFastPath function) {
