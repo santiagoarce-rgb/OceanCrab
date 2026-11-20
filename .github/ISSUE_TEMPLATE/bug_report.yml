@@ -1,0 +1,46 @@
+name: Bug report
+description: A crash, hang, rendering or audio problem
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do **not** attach game files, extracted assets or generated code.
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse --short HEAD`
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distro, compiler version and GPU/driver
+      placeholder: Arch Linux, GCC 15, AMD RX 6700 (RADV)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact command and environment variables
+      placeholder: |
+        PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
+        1. Select New Game
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What happened vs. what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: For crashes, run with `PSPRECOMP_TRACE_ON_ERROR=1` and paste the last ~100 lines
+      render: text

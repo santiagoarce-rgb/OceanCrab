@@ -1,0 +1,19 @@
+name: Feature or enhancement
+description: Suggest an enhancement, QoL option or tooling improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is it useful?
+  - type: textarea
+    id: approach
+    attributes:
+      label: Possible approach
+      description: Guest functions, NIDs or structures involved, if known
