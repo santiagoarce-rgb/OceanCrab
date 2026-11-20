@@ -332,6 +332,18 @@ static std::vector<std::uint8_t> make_divzero_codegen_test_elf() {
     return bytes;
 }
 
+static std::vector<std::uint8_t> make_vi2x_test_elf() {
+    auto bytes = make_branch_delay_test_elf();
+    const std::uint32_t code[] = {
+        0xD03F8488u, // vi2s.q  (vd=8, vs=4)
+        0xD03C808Cu, // vi2uc.q (vd=12, vs=0)
+        0x03E00008u, // jr ra
+        0x00000000u, // nop
+    };
+    for (std::size_t i = 0; i < std::size(code); ++i) put32(bytes, 0x80u + i * 4u, code[i]);
+    return bytes;
+}
+
 static std::vector<std::uint8_t> make_vh2f_test_elf() {
     auto bytes = make_branch_delay_test_elf();
     const std::uint32_t code[] = {
@@ -517,6 +529,40 @@ static void test_codegen_zero_divisor_constant_folding() {
     require(text.find("divisor = static_cast<std::int32_t>(0u)") == std::string::npos &&
                 text.find("const std::uint32_t divisor = 0u") == std::string::npos,
             "$zero divisor must never be materialized as a compile-time zero divisor");
+    std::filesystem::remove_all(root);
+#endif
+}
+
+static void test_codegen_vi2x_lowering() {
+#ifndef PSPRECOMP_CODEGEN_PATH
+    throw std::runtime_error("PSPRECOMP_CODEGEN_PATH was not provided by CMake");
+#else
+    const auto root = std::filesystem::temp_directory_path() / "psprecomp_vi2x_codegen_test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    const auto elf_path = root / "vi2x.elf";
+    const auto csv_path = root / "functions.csv";
+    const auto cpp_path = root / "generated.cpp";
+
+    const auto bytes = make_vi2x_test_elf();
+    { std::ofstream out(elf_path, std::ios::binary); out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size())); }
+    { std::ofstream out(csv_path); out << "name,address,size\nvi2x_test,0x08804000,0x00000010\n"; }
+
+    const std::filesystem::path codegen_path = PSPRECOMP_CODEGEN_PATH;
+    const std::string command = shell_quote(codegen_path) + " " + shell_quote(elf_path) + " " + shell_quote(csv_path) + " " + shell_quote(cpp_path);
+    require(std::system(shell_command(command).c_str()) == 0, "psp_recomp VI2X fixture generation failed");
+
+    std::string text;
+    {
+        std::ifstream generated(cpp_path);
+        text.assign((std::istreambuf_iterator<char>(generated)), std::istreambuf_iterator<char>());
+    }
+    require(text.find("ctx.execute_vfpu_vi2x(8u, 4u, 4u, 3u)") != std::string::npos,
+            "VI2S.Q was not lowered to the dedicated AOT helper");
+    require(text.find("ctx.execute_vfpu_vi2x(12u, 0u, 4u, 0u)") != std::string::npos,
+            "VI2UC.Q was not lowered to the dedicated AOT helper");
+    require(text.find("not lowered yet") == std::string::npos,
+            "VI2X codegen retained an unsupported fallback");
     std::filesystem::remove_all(root);
 #endif
 }
@@ -1465,6 +1511,57 @@ int main() {
                     vx2i_context.vfpu_ctrl[2] == 0u,
                 "VX2I did not consume VFPU prefixes");
 
+        // VI2x packing (inverse of VX2I). 0xD03F8080 is the exact word used by
+        // SpongeBob's Bink audio float -> s16 PCM path.
+        require(psprecomp::decode_allegrex(0xD03F8080u).kind == psprecomp::OpcodeKind::Vi2x &&
+                    psprecomp::decode_allegrex(0xD03F8080u).mnemonic == "vi2s",
+                "VI2S.Q decode failed");
+        require(psprecomp::decode_allegrex(0xD03C8080u).mnemonic == "vi2uc" &&
+                    psprecomp::decode_allegrex(0xD03D8080u).mnemonic == "vi2c" &&
+                    psprecomp::decode_allegrex(0xD03E8080u).mnemonic == "vi2us",
+                "VI2UC/VI2C/VI2US decode failed");
+
+        psprecomp::AllegrexContext vi2x_context{};
+        vi2x_context.eat_vfpu_prefixes();
+        const float wide_ints[4]{
+            std::bit_cast<float>(0x80000000u), // INT_MIN
+            std::bit_cast<float>(0x7FFF0000u),
+            std::bit_cast<float>(0x12345678u),
+            std::bit_cast<float>(0xFFFF8000u), // negative
+        };
+        vi2x_context.write_vfpu_vector(wide_ints, 4u, 4u);
+        float vi2x_result[4]{};
+
+        vi2x_context.execute_vfpu_vi2x(8u, 4u, 4u, 3u); // vi2s.q
+        vi2x_context.read_vfpu_vector(vi2x_result, 8u, 2u);
+        require(std::bit_cast<std::uint32_t>(vi2x_result[0]) == 0x7FFF8000u &&
+                    std::bit_cast<std::uint32_t>(vi2x_result[1]) == 0xFFFF1234u,
+                "VI2S.Q signed half packing failed");
+
+        vi2x_context.execute_vfpu_vi2x(8u, 4u, 2u, 2u); // vi2us.p: clamp then >> 15
+        require(vi2x_context.vfpu_scalar_bits(8u) == 0xFFFE0000u,
+                "VI2US.P unsigned half packing failed");
+
+        vi2x_context.execute_vfpu_vi2x(8u, 4u, 4u, 1u); // vi2c.q: >> 24
+        require(vi2x_context.vfpu_scalar_bits(8u) == 0xFF127F80u,
+                "VI2C.Q signed byte packing failed");
+
+        vi2x_context.execute_vfpu_vi2x(8u, 4u, 4u, 0u); // vi2uc.q: clamp then >> 23
+        require(vi2x_context.vfpu_scalar_bits(8u) == 0x0024FF00u,
+                "VI2UC.Q unsigned byte packing failed");
+
+        // Destination write mask is applied on the (shorter) output vector.
+        vi2x_context.set_vfpu_scalar_bits(8u, 0xAAAAAAAAu);
+        vi2x_context.set_vfpu_scalar_bits(9u, 0xBBBBBBBBu);
+        vi2x_context.vfpu_ctrl[2] = 1u << 9u; // Preserve destination Y.
+        vi2x_context.execute_vfpu_vi2x(8u, 4u, 4u, 3u);
+        require(vi2x_context.vfpu_scalar_bits(8u) == 0x7FFF8000u &&
+                    vi2x_context.vfpu_scalar_bits(9u) == 0xBBBBBBBBu,
+                "VI2S destination mask failed");
+        require(vi2x_context.vfpu_ctrl[0] == 0xE4u && vi2x_context.vfpu_ctrl[1] == 0xE4u &&
+                    vi2x_context.vfpu_ctrl[2] == 0u,
+                "VI2X did not consume VFPU prefixes");
+
         require(psprecomp::decode_allegrex(0xD047A408u).kind == psprecomp::OpcodeKind::VfpuHorizontal &&
                     psprecomp::decode_allegrex(0xD047A408u).mnemonic == "vavg",
                 "VAVG.T decode failed");
@@ -1638,6 +1735,7 @@ int main() {
         test_codegen_link_branch_before_delay_slot();
         test_codegen_zero_divisor_constant_folding();
         test_codegen_vh2f_lowering();
+        test_codegen_vi2x_lowering();
         test_vfpu_branch_cfg_discovery();
         test_automatic_cfg_and_codegen();
         test_automatic_cross_unit_tail_chaining();

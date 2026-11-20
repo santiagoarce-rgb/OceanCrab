@@ -457,6 +457,16 @@ std::string emit_regular(const psprecomp::DecodedInstruction &d, std::uint32_t p
             << source_length << "u, " << operation << "u);\n";
         break;
     }
+    case psprecomp::OpcodeKind::Vi2x: {
+        const std::uint32_t size_code = ((d.word >> 7u) & 1u) | (((d.word >> 15u) & 1u) << 1u);
+        const std::uint32_t source_length = size_code + 1u;
+        const std::uint32_t destination = d.word & 0x7Fu;
+        const std::uint32_t source = (d.word >> 8u) & 0x7Fu;
+        const std::uint32_t operation = (d.word >> 16u) & 3u;
+        out << "    ctx.execute_vfpu_vi2x(" << destination << "u, " << source << "u, "
+            << source_length << "u, " << operation << "u);\n";
+        break;
+    }
     case psprecomp::OpcodeKind::Mtv:
         out << "    ctx.set_vfpu_scalar_bits(" << (d.word & 0x7Fu) << "u, " << reg(d.rt) << ");\n";
         break;

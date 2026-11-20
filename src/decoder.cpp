@@ -313,6 +313,10 @@ DecodedInstruction decode_allegrex(std::uint32_t word) {
             d.kind = OpcodeKind::Vx2i;
             static constexpr const char *names[4]{"vuc2i", "vc2i", "vus2i", "vs2i"};
             d.mnemonic = names[operation - 24u];
+        } else if (group == 1u && operation >= 28u) {
+            d.kind = OpcodeKind::Vi2x;
+            static constexpr const char *names[4]{"vi2uc", "vi2c", "vi2us", "vi2s"};
+            d.mnemonic = names[operation - 28u];
         } else if (group >= 16u && group <= 19u) {
             d.kind = OpcodeKind::Vf2i;
             static constexpr const char *names[4]{"vf2in", "vf2iz", "vf2iu", "vf2id"};
