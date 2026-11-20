@@ -8,4 +8,10 @@ A profile is selected at configure time:
 cmake -S . -B out/<profile> -DPSPRECOMP_PROFILE=<profile>
 ```
 
-The current repository includes `vcs`. See `docs/PROFILE_GUIDE.md` before adding another title.
+| Profile | Title | Status |
+|---|---|---|
+| `spongebob` | SpongeBob's Truth or Square (`ULUS-10478`) | Active — the Ocean Crab port |
+
+Each profile keeps its generated AOT corpus in `profiles/<id>/generated/`. That corpus is derived from the user's own game executable and is never committed.
+
+See `docs/PROFILE_GUIDE.md` before adding another title.
