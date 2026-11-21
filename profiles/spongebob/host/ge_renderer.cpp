@@ -3931,6 +3931,9 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
                       << " clutfmt=" << (clut & 3u) << " tfunc=" << (function & 7u)
                       << " alpha=" << ((function >> 8u) & 1u) << " through=" << layout.through
                       << " prim=" << primitive
+                      << " uvgen=" << (data24(commands[0xC0u]) & 3u)
+                      << " uvsrc=" << ((data24(commands[0xC0u]) >> 8u) & 3u)
+                      << " mip=" << ((data24(commands[0xC2u]) >> 16u) & 7u)
                       << " blend_en=" << (data24(commands[0x21u]) & 1u)
                       << " blend=" << psprecomp::hex32(data24(commands[0xDFu]))
                       << " fixA=" << psprecomp::hex32(data24(commands[0xE0u]))

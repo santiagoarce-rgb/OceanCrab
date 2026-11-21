@@ -13,6 +13,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -2136,6 +2137,36 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
                     found != s.textures.end() && found->second.gpu.set != VK_NULL_HANDLE && !found->second.dirty) {
                     sampled_set = found->second.gpu.set;
                     textured = true;
+                }
+            }
+        }
+        // PSPRECOMP_GE_TEXTURE_LOG: report (once per texture) every textured
+        // draw that silently falls back to the white texture, and why. Water,
+        // stomach acid and lamp halos render as flat vertex color this way.
+        if (batch.draw.texture_enabled && !textured) {
+            static const bool fallback_log = std::getenv("PSPRECOMP_GE_TEXTURE_LOG") != nullptr;
+            if (fallback_log) {
+                static std::unordered_map<std::uint64_t, bool> reported;
+                const std::uint64_t key = texture_key(batch.draw) ^
+                    (static_cast<std::uint64_t>(batch.framebuffer_feedback) << 63u);
+                if (reported.emplace(key, true).second) {
+                    const char *reason = "not-cached";
+                    if (batch.framebuffer_feedback) {
+                        reason = batch.feedback_address == target->address ? "self-feedback-failed"
+                                                                           : "feedback-target-missing";
+                    } else if (const auto found = s.textures.find(texture_key(batch.draw));
+                               found != s.textures.end()) {
+                        reason = found->second.dirty ? "dirty" : "no-descriptor";
+                    }
+                    std::cerr << "[ge-texture] WHITE FALLBACK reason=" << reason
+                              << " addr=" << std::hex << "0x" << batch.draw.texture_address
+                              << std::dec << " fmt=" << batch.draw.texture_format
+                              << " size=" << batch.draw.texture_width << "x" << batch.draw.texture_height
+                              << " bufw=" << batch.draw.texture_buffer_width
+                              << " mip=" << batch.draw.texture_mipmap_enabled
+                              << " maxlvl=" << batch.draw.texture_max_level
+                              << " swz=" << batch.draw.texture_swizzled
+                              << " target=0x" << std::hex << target->address << std::dec << "\n";
                 }
             }
         }
