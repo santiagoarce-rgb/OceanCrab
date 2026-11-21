@@ -1,4 +1,5 @@
 #include "ge_gpu_backend.hpp"
+#include "ge_diag.hpp"
 
 #if defined(SPONGEBOB_VULKAN_GE_BACKEND)
 
@@ -2116,6 +2117,7 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
                 break;
             default:
                 ++s.report.unsupported_texture_function_game_draw_calls;
+                ge_diag_count_unsupported_texture_function(batch.draw.texture_function);
                 break;
             }
         }

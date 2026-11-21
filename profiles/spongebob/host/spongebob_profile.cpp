@@ -4,6 +4,7 @@
 #include "display_window.hpp"
 #include "ge_gpu_backend.hpp"
 #include "ge_renderer.hpp"
+#include "ge_diag.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/guest_memory.hpp"
@@ -1314,6 +1315,7 @@ void dump_frame_if_requested(std::span<const std::byte> rgba, std::uint32_t widt
 // the software path.
 void present_display_frame(psprecomp::Runtime &rt) {
     display_window_pump();
+    ge_diag_frame_tick();
     if (display_state.frame_buffer == 0u) return;
     if (ge_gpu_backend_active()) {
         const std::uint64_t vblank = virtual_time_us / kVblankPeriodUs;

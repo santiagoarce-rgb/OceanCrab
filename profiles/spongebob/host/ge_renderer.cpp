@@ -1,5 +1,6 @@
 #include "ge_renderer.hpp"
 #include "ge_gpu_backend.hpp"
+#include "ge_diag.hpp"
 #include "spongebob_controls.hpp"
 #include "spongebob_fps_overlay.hpp"
 #include "spongebob_render_config.hpp"
@@ -22,6 +23,7 @@
 #include <type_traits>
 #include <limits>
 #include <mutex>
+#include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -34,6 +36,49 @@
 #endif
 
 namespace spongebob {
+
+// ---------------------------------------------------------------------------
+// PSPRECOMP_GE_UNSUPPORTED_DIAG (see ge_diag.hpp).
+namespace {
+constexpr const char *kPrimitiveNames[8] = {"points", "lines", "line_strip", "triangles",
+                                            "tri_strip", "tri_fan", "rectangles", "prim7"};
+std::array<std::atomic<std::uint64_t>, 16> g_dropped_primitives{};  // [primitive + 8*through]
+std::array<std::atomic<std::uint64_t>, 8> g_unsupported_texture_functions{};
+}  // namespace
+
+bool ge_unsupported_diag_enabled() noexcept {
+    static const bool enabled = std::getenv("PSPRECOMP_GE_UNSUPPORTED_DIAG") != nullptr;
+    return enabled;
+}
+
+void ge_diag_count_dropped_primitive(std::uint32_t primitive, bool through) noexcept {
+    if (!ge_unsupported_diag_enabled()) return;
+    g_dropped_primitives[(primitive & 7u) + (through ? 8u : 0u)].fetch_add(1u, std::memory_order_relaxed);
+}
+
+void ge_diag_count_unsupported_texture_function(std::uint32_t texture_function) noexcept {
+    if (!ge_unsupported_diag_enabled()) return;
+    g_unsupported_texture_functions[texture_function & 7u].fetch_add(1u, std::memory_order_relaxed);
+}
+
+void ge_diag_frame_tick() noexcept {
+    if (!ge_unsupported_diag_enabled()) return;
+    static std::uint64_t frames = 0u;
+    if (frames == 0u) std::cerr << "[ge-unsupported] diagnostic active (summary every 60 frames, silent if nothing dropped)\n";
+    if (++frames % 60u != 0u) return;
+    std::string line;
+    for (std::uint32_t i = 0u; i < 16u; ++i) {
+        const std::uint64_t n = g_dropped_primitives[i].exchange(0u, std::memory_order_relaxed);
+        if (n == 0u) continue;
+        line += std::string(" ") + kPrimitiveNames[i & 7u] + (i >= 8u ? "/2d" : "/3d") + "=" + std::to_string(n);
+    }
+    for (std::uint32_t i = 0u; i < 8u; ++i) {
+        const std::uint64_t n = g_unsupported_texture_functions[i].exchange(0u, std::memory_order_relaxed);
+        if (n != 0u) line += " tfunc" + std::to_string(i) + "=" + std::to_string(n);
+    }
+    if (!line.empty()) std::cerr << "[ge-unsupported] frame=" << frames << line << "\n";
+}
+// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -4025,6 +4070,7 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
 
     if (primitive > 6u || (!layout.through && primitive == 6u)) {
         if (collect_diagnostic_stats) ++stats.unsupported_primitives;
+        ge_diag_count_dropped_primitive(primitive, layout.through);
         advance_stream();
         error.clear();
         return true;
@@ -4666,6 +4712,7 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
         break;
     default:
         if (collect_diagnostic_stats) ++stats.unsupported_primitives;
+        ge_diag_count_dropped_primitive(primitive, layout.through);
         break;
     }
     advance_stream();
