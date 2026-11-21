@@ -134,6 +134,62 @@ std::uint64_t ge_enqueue_count{};
 std::uint64_t ge_list_sync_count{};
 std::uint64_t ge_draw_sync_count{};
 std::uint64_t frame_present_count{};
+// PSPRECOMP_FRAME_PROFILE=1: where each frame's wall time goes. Every 120
+// presented frames prints the average ms per frame for GE list translation,
+// Vulkan finish + readback, window present (SDL scaling + menu), frame-pacing
+// sleep, and the rest ("game": translated code, HLE, audio).
+struct FrameProfile {
+    bool enabled = std::getenv("PSPRECOMP_FRAME_PROFILE") != nullptr;
+    std::uint64_t ge_ns{}, finish_ns{}, present_ns{}, sleep_ns{}, frames{};
+    std::uint64_t ge_commands{}, ge_runs{}, ge_prim_ns{};
+    std::chrono::steady_clock::time_point window_start{std::chrono::steady_clock::now()};
+};
+FrameProfile frame_profile;
+struct ProfileScope {
+    std::uint64_t *sink;
+    std::chrono::steady_clock::time_point start;
+    explicit ProfileScope(std::uint64_t &target)
+        : sink(frame_profile.enabled ? &target : nullptr), start(std::chrono::steady_clock::now()) {}
+    ~ProfileScope() {
+        if (sink != nullptr)
+            *sink += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - start).count());
+    }
+};
+void frame_profile_tick() {
+    if (!frame_profile.enabled || ++frame_profile.frames < 120u) return;
+    const auto now = std::chrono::steady_clock::now();
+    const double wall = std::chrono::duration<double, std::milli>(now - frame_profile.window_start).count();
+    const double n = static_cast<double>(frame_profile.frames);
+    const auto ms = [&](std::uint64_t ns) { return static_cast<double>(ns) / 1e6 / n; };
+    const double frame = wall / n;
+    const double game = frame - ms(frame_profile.ge_ns) - ms(frame_profile.finish_ns) -
+                        ms(frame_profile.present_ns) - ms(frame_profile.sleep_ns);
+    char line[400];
+    std::snprintf(line, sizeof line,
+                  "[frame-profile] %.2f ms/frame (%.0f fps): game %.2f | ge-lists %.2f | vulkan+readback %.2f | "
+                  "present %.2f | pacing-sleep %.2f || ge: %.0f cmds %.1f runs, prims %.2f ms /frame",
+                  frame, 1000.0 / frame, game, ms(frame_profile.ge_ns), ms(frame_profile.finish_ns),
+                  ms(frame_profile.present_ns), ms(frame_profile.sleep_ns),
+                  static_cast<double>(frame_profile.ge_commands) / n, static_cast<double>(frame_profile.ge_runs) / n,
+                  ms(frame_profile.ge_prim_ns));
+    std::cerr << line << "\n";
+    static const bool ge_phase_diag = std::getenv("PSPRECOMP_GE_PHASE_DIAG") != nullptr;
+    if (ge_phase_diag) {  // PSPRECOMP_GE_PHASE_DIAG: split of the ge-lists time
+        const GePhaseTotals t = ge_phase_totals();
+        std::snprintf(line, sizeof line,
+                      "[frame-profile]   ge: draw-setup %.2f | texture-upload %.2f | vertex-decode %.2f | "
+                      "gpu-stage %.2f | tri-prep %.2f | gpu-accumulate %.2f | %.0f prims %.0f verts /frame",
+                      ms(t.draw_setup_ns), ms(t.texture_upload_ns), ms(t.vertex_decode_ns), ms(t.gpu_stage_ns),
+                      ms(t.triangle_prep_ns), ms(t.gpu_accumulate_ns), static_cast<double>(t.primitives) / n,
+                      static_cast<double>(t.vertices) / n);
+        std::cerr << line << "\n";
+        reset_ge_phase_totals();
+    }
+    frame_profile = FrameProfile{};
+    frame_profile.window_start = now;
+}
+
 // Last pad state handed to the game (for PSPRECOMP_PLAYER_RECORD).
 std::uint32_t last_pad_buttons{};
 std::uint8_t last_pad_lx{128u}, last_pad_ly{128u};
@@ -175,6 +231,7 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
     std::vector<CallFrame> call_stack;
 
     list.state = GeListState::Running;
+    ++frame_profile.ge_runs;
     std::uint32_t executed = 0u;
     while (executed < kMaximumCommandsPerRun) {
         const std::uint32_t pc = list.pc;
@@ -184,6 +241,34 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
 
         const std::uint32_t command = op >> 24u;
         const std::uint32_t data = op & 0x00FFFFFFu;
+        ++frame_profile.ge_commands;
+        // PSPRECOMP_GE_LIST_DIAG: opcode and PC-page histogram, printed every 2M commands.
+        static const bool list_diag = std::getenv("PSPRECOMP_GE_LIST_DIAG") != nullptr;
+        if (list_diag) {
+            static std::array<std::uint64_t, 256> opcode_hist{};
+            static std::unordered_map<std::uint32_t, std::uint64_t> page_hist;
+            static std::uint64_t seen = 0u;
+            ++opcode_hist[command];
+            ++page_hist[pc & ~0xFFFu];
+            if (++seen % 2000000u == 0u) {
+                std::cerr << "[ge-list] top opcodes:";
+                for (int k = 0; k < 6; ++k) {
+                    const auto top = std::max_element(opcode_hist.begin(), opcode_hist.end());
+                    std::cerr << " 0x" << std::hex << (top - opcode_hist.begin()) << std::dec << "=" << *top;
+                    *top = 0u;
+                }
+                std::cerr << " | top pages:";
+                for (int k = 0; k < 4 && !page_hist.empty(); ++k) {
+                    auto top = std::max_element(page_hist.begin(), page_hist.end(),
+                                                [](const auto &a, const auto &b) { return a.second < b.second; });
+                    std::cerr << " " << psprecomp::hex32(top->first) << "=" << top->second;
+                    page_hist.erase(top);
+                }
+                std::cerr << "\n";
+                opcode_hist.fill(0u);
+                page_hist.clear();
+            }
+        }
 
         ge_state.commands[command] = op;
         // 0x2A-0x41: bone, world, view, projection and texture (0x40 TMS / 0x41
@@ -205,6 +290,7 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
             ge_state.index_address = ge_relative_address(data);
             break;
         case kGeCommandPrimitive: {
+            ProfileScope prim_scope(frame_profile.ge_prim_ns);
             GeRenderStats stats{};
             std::string error;
             if (!render_ge_primitive(rt.memory(), ge_state.commands, ge_state.transform,
@@ -265,12 +351,39 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
             std::uint32_t previous{};
             if (pc >= 4u && read_command(pc - 4u, previous) &&
                 (previous >> 24u) == kGeCommandFinish) {
+                static const bool diag = std::getenv("PSPRECOMP_GE_LIST_DIAG") != nullptr;
+                static int shown = 0;
+                if (diag && shown < 8) {
+                    ++shown;
+                    std::cerr << "[ge-list] FINISH+END list=" << psprecomp::hex32(list.list_address)
+                              << " end_pc=" << psprecomp::hex32(pc) << " executed=" << executed
+                              << " bytes_from_start=" << (pc - list.list_address) << "\n";
+                }
                 list.state = GeListState::Completed;
                 list.pc = next_pc;
                 return true;
             }
             const std::uint32_t link = ge_relative_address(data);
-            if (link == 0u || link == pc) { list.state = GeListState::Completed; return true; }
+            {
+                static const bool diag = std::getenv("PSPRECOMP_GE_LIST_DIAG") != nullptr;
+                static int shown = 0;
+                if (diag && link != 0u && link != pc && shown < 12) {
+                    ++shown;
+                    std::cerr << "[ge-list] END links: pc=" << psprecomp::hex32(pc) << " end_data="
+                              << psprecomp::hex32(data) << " prev=" << psprecomp::hex32(previous)
+                              << " -> " << psprecomp::hex32(link) << " list=" << psprecomp::hex32(list.list_address)
+                              << " stall=" << psprecomp::hex32(list.stall_address) << "\n";
+                }
+            }
+            if (link == 0u || link == pc) {
+                static const bool diag = std::getenv("PSPRECOMP_GE_LIST_DIAG") != nullptr;
+                if (diag)
+                    std::cerr << "[ge-list] list=" << psprecomp::hex32(list.list_address)
+                              << " stall=" << psprecomp::hex32(list.stall_address) << " end_pc=" << psprecomp::hex32(pc)
+                              << " executed=" << executed << "\n";
+                list.state = GeListState::Completed;
+                return true;
+            }
             next_pc = link;
             break;
         }
@@ -279,6 +392,17 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
             break;
         default:
             break;
+        }
+        {
+            // PSPRECOMP_GE_LIST_DIAG: trace control flow of one list run (the 300th).
+            static const bool diag = std::getenv("PSPRECOMP_GE_LIST_DIAG") != nullptr;
+            static std::uint64_t run_id = 0u;
+            constexpr std::uint64_t traced_run = 300u;
+            if (diag && executed == 1u) ++run_id;
+            if (diag && run_id == traced_run && next_pc != ((pc + 4u) & 0x0FFFFFFFu) && executed < 200000u)
+                std::cerr << "[ge-flow] pc=" << psprecomp::hex32(pc) << " op=" << psprecomp::hex32(op)
+                          << " -> " << psprecomp::hex32(next_pc) << " base=" << psprecomp::hex32(ge_state.commands[kGeCommandBase])
+                          << " offset=" << psprecomp::hex32(ge_state.offset_address) << " depth=" << call_stack.size() << "\n";
         }
         list.pc = next_pc;
     }
@@ -307,7 +431,10 @@ void ge_list_enqueue(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
     ge_list_table.lists[guest_id] = std::move(record);
     ge_list_table.queue.push_back(guest_id);
     ctx.set_gpr(2, guest_id);
-    (void)execute_ge_list(rt, ge_list_table.lists[guest_id]);
+    {
+        ProfileScope scope(frame_profile.ge_ns);
+        (void)execute_ge_list(rt, ge_list_table.lists[guest_id]);
+    }
 }
 
 void ge_list_sync(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
@@ -839,6 +966,7 @@ void pace_virtual_time_to_wall_clock() {
         // keep the anchor current so enabling later would not stall.
         offset_us = virt - wall;
     } else if (ahead > 0) {
+        ProfileScope scope(frame_profile.sleep_ns);
         precise_sleep_until(std::chrono::steady_clock::now() + std::chrono::microseconds(ahead));
         slept_us += static_cast<std::uint64_t>(ahead);
     } else if (-ahead > kMaxLagUs) {
@@ -1515,13 +1643,18 @@ void present_display_frame(psprecomp::Runtime &rt) {
     display_window_pump();
     ge_diag_frame_tick();
     if (display_state.frame_buffer == 0u) return;
+    frame_profile_tick();
     if (ge_gpu_backend_active()) {
         const std::uint64_t vblank = virtual_time_us / kVblankPeriodUs;
-        (void)ge_gpu_backend_finish_color_frame(vblank);
+        {
+            ProfileScope scope(frame_profile.finish_ns);
+            (void)ge_gpu_backend_finish_color_frame(vblank);
+        }
         const GeGpuBackendReport report = ge_gpu_backend_report();
         const std::span<const std::byte> rgba = ge_gpu_backend_game_frame_rgba();
         if (!rgba.empty() && report.offscreen_width != 0u && report.offscreen_height != 0u) {
             dump_frame_if_requested(rgba, report.offscreen_width, report.offscreen_height);
+            ProfileScope scope(frame_profile.present_ns);
             display_window_present_rgba(rgba, report.offscreen_width, report.offscreen_height);
             ge_gpu_backend_mark_window_presented();
             return;
@@ -2210,8 +2343,10 @@ void spongebob_profile_tick(psprecomp::Runtime &rt) {
     // synchronously on enqueue; this drains leftovers defensively).
     for (std::uint32_t id : ge_list_table.queue) {
         auto it = ge_list_table.lists.find(id);
-        if (it != ge_list_table.lists.end() && it->second.state == GeListState::Queued)
+        if (it != ge_list_table.lists.end() && it->second.state == GeListState::Queued) {
+            ProfileScope scope(frame_profile.ge_ns);
             (void)execute_ge_list(rt, it->second);
+        }
     }
     ge_list_table.queue.clear();
 
