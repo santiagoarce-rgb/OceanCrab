@@ -160,6 +160,21 @@ struct VulkanState {
     VkDeviceMemory readback_memory{};
     void *readback_mapped{};
     bool readback_coherent{true};  // false: invalidate before each CPU read
+    // Frame pipelining: two slots. Frame N records into slot k and is submitted
+    // without waiting; the CPU then waits for frame N-1 (slot k^1), which the GPU
+    // finished while the game ran, and presents it. Geometry, uniform and readback
+    // buffers are one allocation with a region per slot (descriptor sets reference
+    // the uniform buffer, so it cannot be swapped per slot).
+    static constexpr std::uint32_t kFrameSlots = 2u;
+    std::array<VkCommandBuffer, kFrameSlots> commands{};
+    std::array<VkFence, kFrameSlots> fences{};
+    std::array<bool, kFrameSlots> slot_pending{};
+    std::array<bool, kFrameSlots> slot_display_ready{};
+    std::array<std::vector<Staging>, kFrameSlots> slot_staging{};
+    std::uint32_t frame_slot{};
+    VkDeviceSize geometry_slot_bytes{};
+    VkDeviceSize uniform_slot_bytes{};
+    VkDeviceSize readback_slot_bytes{};
     Texture white{};
     std::unordered_map<std::uint64_t, VkPipeline> pipelines{};
     std::unordered_map<std::uint64_t, VkSampler> sampler_cache{};
@@ -1182,7 +1197,18 @@ void destroy_backend(VulkanState &s) noexcept {
     if (s.vertex_shader) vkDestroyShaderModule(s.device, s.vertex_shader, nullptr);
     if (s.fragment_shader) vkDestroyShaderModule(s.device, s.fragment_shader, nullptr);
     if (s.render_pass) vkDestroyRenderPass(s.device, s.render_pass, nullptr);
-    if (s.command) vkFreeCommandBuffers(s.device, s.pool, 1u, &s.command);
+    for (std::uint32_t slot = 0u; slot < VulkanState::kFrameSlots; ++slot) {
+        for (Staging &staging : s.slot_staging[slot]) {
+            vkDestroyBuffer(s.device, staging.buffer, nullptr);
+            vkFreeMemory(s.device, staging.memory, nullptr);
+        }
+        s.slot_staging[slot].clear();
+        s.slot_pending[slot] = false;
+        if (s.fences[slot]) vkDestroyFence(s.device, s.fences[slot], nullptr);
+        s.fences[slot] = VK_NULL_HANDLE;
+    }
+    if (s.commands[0]) vkFreeCommandBuffers(s.device, s.pool, VulkanState::kFrameSlots, s.commands.data());
+    s.commands = {};
     if (s.pool) vkDestroyCommandPool(s.device, s.pool, nullptr);
     if (s.device) vkDestroyDevice(s.device, nullptr);
     if (s.debug_messenger != VK_NULL_HANDLE && s.instance != VK_NULL_HANDLE) {
@@ -1491,10 +1517,19 @@ bool create_backend(VulkanState &s, std::string &error) {
     command_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     command_info.commandPool = s.pool;
     command_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    command_info.commandBufferCount = 1u;
-    if (vkAllocateCommandBuffers(s.device, &command_info, &s.command) != VK_SUCCESS) {
+    command_info.commandBufferCount = VulkanState::kFrameSlots;
+    if (vkAllocateCommandBuffers(s.device, &command_info, s.commands.data()) != VK_SUCCESS) {
         error = "vkAllocateCommandBuffers failed";
         return false;
+    }
+    s.command = s.commands[0];
+    for (VkFence &fence : s.fences) {
+        VkFenceCreateInfo fence_info{};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        if (vkCreateFence(s.device, &fence_info, nullptr, &fence) != VK_SUCCESS) {
+            error = "vkCreateFence failed";
+            return false;
+        }
     }
     s.report.command_pool_created = true;
 
@@ -1605,12 +1640,15 @@ bool create_backend(VulkanState &s, std::string &error) {
     const VkDeviceSize uniform_size = static_cast<VkDeviceSize>(kMaxDraws) * s.uniform_align;
     const VkDeviceSize readback_size = static_cast<VkDeviceSize>(s.target_width) * s.target_height * 4u;
     const VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    if (!create_buffer(s, geometry_size,
+    s.geometry_slot_bytes = geometry_size;
+    s.uniform_slot_bytes = uniform_size;
+    s.readback_slot_bytes = readback_size;
+    if (!create_buffer(s, geometry_size * VulkanState::kFrameSlots,
                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                        host, s.geometry, s.geometry_memory, &s.geometry_mapped, error) ||
-        !create_buffer(s, uniform_size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, host,
+        !create_buffer(s, uniform_size * VulkanState::kFrameSlots, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, host,
                        s.uniforms, s.uniform_memory, &s.uniform_mapped, error) ||
-        !create_readback_buffer(s, readback_size, error))
+        !create_readback_buffer(s, readback_size * VulkanState::kFrameSlots, error))
         return false;
     s.report.transfer_buffer_created = true;
     s.report.transfer_memory_mapped = true;
@@ -2084,11 +2122,31 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
         ++s.frame_epoch;
         return false;
     }
+    // Pipelining: this frame uses slot k. Normally slot k was already waited
+    // (it held frame N-2), but wait defensively before reusing its regions.
+    const std::uint32_t slot = s.frame_slot;
+    const auto retire_slot = [&s](std::uint32_t k) {
+        if (!s.slot_pending[k]) return;
+        vkWaitForFences(s.device, 1u, &s.fences[k], VK_TRUE, UINT64_MAX);
+        vkResetFences(s.device, 1u, &s.fences[k]);
+        for (Staging &staging : s.slot_staging[k]) {
+            vkDestroyBuffer(s.device, staging.buffer, nullptr);
+            vkFreeMemory(s.device, staging.memory, nullptr);
+        }
+        s.slot_staging[k].clear();
+        s.slot_pending[k] = false;
+    };
+    retire_slot(slot);
+    s.command = s.commands[slot];
+    const VkDeviceSize geometry_base = s.geometry_slot_bytes * slot;
+    const VkDeviceSize uniform_base = s.uniform_slot_bytes * slot;
+    const VkDeviceSize readback_base = s.readback_slot_bytes * slot;
     if (s.geometry_mapped != nullptr) {
+        std::byte *geometry = static_cast<std::byte *>(s.geometry_mapped) + geometry_base;
         if (!s.vertices.empty())
-            std::memcpy(s.geometry_mapped, s.vertices.data(), vertex_bytes);
+            std::memcpy(geometry, s.vertices.data(), vertex_bytes);
         if (!s.indices.empty())
-            std::memcpy(static_cast<std::byte *>(s.geometry_mapped) + vertex_bytes, s.indices.data(), index_bytes);
+            std::memcpy(geometry + vertex_bytes, s.indices.data(), index_bytes);
     }
     VkCommandBufferBeginInfo begin{};
     begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -2131,10 +2189,10 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
         VkPipeline pipeline = pipeline_for(s, batch.draw, strip, cull, ccw, error);
         if (pipeline == VK_NULL_HANDLE) continue;
         vkCmdBindPipeline(s.command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-        VkDeviceSize offset = 0u;
+        VkDeviceSize offset = geometry_base;
         vkCmdBindVertexBuffers(s.command, 0u, 1u, &s.geometry, &offset);
         if (batch.indexed) {
-            vkCmdBindIndexBuffer(s.command, s.geometry, vertex_bytes, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(s.command, s.geometry, geometry_base + vertex_bytes, VK_INDEX_TYPE_UINT32);
         }
         const auto scale = [&](std::int32_t value, std::uint32_t logical, std::uint32_t target_size) {
             return static_cast<std::int32_t>(std::clamp<std::int64_t>(
@@ -2228,10 +2286,11 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
             }
         }
         DrawUniforms uniforms = make_uniforms(batch, target->logical_width, target->logical_height, textured);
-        std::memcpy(static_cast<std::byte *>(s.uniform_mapped) +
+        std::memcpy(static_cast<std::byte *>(s.uniform_mapped) + uniform_base +
                         static_cast<std::size_t>(uniform_slot) * s.uniform_align,
                     &uniforms, sizeof(uniforms));
-        const std::uint32_t dynamic_offset = uniform_slot * s.uniform_align;
+        const std::uint32_t dynamic_offset =
+            static_cast<std::uint32_t>(uniform_base) + uniform_slot * s.uniform_align;
         vkCmdBindDescriptorSets(s.command, VK_PIPELINE_BIND_POINT_GRAPHICS, s.pipeline_layout, 0u, 1u,
                                 &sampled_set, 1u, &dynamic_offset);
         ++uniform_slot;
@@ -2302,6 +2361,7 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
         transition_image(s.command, display->color.image, display->color.layout,
                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT, 1u);
         VkBufferImageCopy copy{};
+        copy.bufferOffset = readback_base;
         copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         copy.imageSubresource.layerCount = 1u;
         copy.imageExtent = {s.target_width, s.target_height, 1u};
@@ -2317,26 +2377,39 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
         submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit.commandBufferCount = 1u;
         submit.pCommandBuffers = &s.command;
-        if (vkQueueSubmit(s.queue, 1u, &submit, VK_NULL_HANDLE) == VK_SUCCESS &&
-            vkQueueWaitIdle(s.queue) == VK_SUCCESS && display_ready && s.readback_mapped != nullptr) {
-            const std::size_t row = static_cast<std::size_t>(s.target_width) * 4u;
-            s.frame_rgba.resize(row * s.target_height);
-            if (!s.readback_coherent) {
-                VkMappedMemoryRange range{};
-                range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-                range.memory = s.readback_memory;
-                range.size = VK_WHOLE_SIZE;
-                vkInvalidateMappedMemoryRanges(s.device, 1u, &range);
-            }
-            std::memcpy(s.frame_rgba.data(), s.readback_mapped, s.frame_rgba.size());
-            readback = true;
+        // Submit frame N without waiting for it.
+        if (vkQueueSubmit(s.queue, 1u, &submit, s.fences[slot]) == VK_SUCCESS) {
+            s.slot_pending[slot] = true;
+            s.slot_display_ready[slot] = display_ready;
+            s.slot_staging[slot] = std::move(s.staging);
         }
     }
+    // Staging that was not handed to a submitted slot (submit failed) is freed now.
     for (Staging &staging : s.staging) {
         vkDestroyBuffer(s.device, staging.buffer, nullptr);
         vkFreeMemory(s.device, staging.memory, nullptr);
     }
     s.staging.clear();
+    // Present frame N-1: the GPU finished it while the game ran frame N.
+    const std::uint32_t previous = (slot + 1u) % VulkanState::kFrameSlots;
+    const bool previous_ready = s.slot_pending[previous] && s.slot_display_ready[previous];
+    retire_slot(previous);
+    if (previous_ready && s.readback_mapped != nullptr) {
+        const std::size_t row = static_cast<std::size_t>(s.target_width) * 4u;
+        s.frame_rgba.resize(row * s.target_height);
+        if (!s.readback_coherent) {
+            VkMappedMemoryRange range{};
+            range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+            range.memory = s.readback_memory;
+            range.size = VK_WHOLE_SIZE;
+            vkInvalidateMappedMemoryRanges(s.device, 1u, &range);
+        }
+        std::memcpy(s.frame_rgba.data(),
+                    static_cast<const std::byte *>(s.readback_mapped) + s.readback_slot_bytes * previous,
+                    s.frame_rgba.size());
+        readback = true;
+    }
+    s.frame_slot = previous;
     if (!display_ready) ++s.report.frames_without_displayed_target;
     ++s.report.game_frames;
     s.report.game_frame_vblank = vblank;

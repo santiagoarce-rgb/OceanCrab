@@ -634,8 +634,14 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Headless: pulsos de X tras New Game saltan las cinemáticas (hub en ~2340).
 - La resolución interna SÍ escala el 3D (comparado 1× vs 3×); lo de "3D en baja"
   era que el .ini nunca se cargaba.
-- Siguiente en rendimiento: presentar con swapchain Vulkan (evitar copia + escalado
-  por software), CPU de vértices (~5 ms), y opciones de producción de CMake.
+- Pipelining de frames (2 slots: buffers de comandos, fences, y una región por slot
+  en los buffers de geometría/uniforms/readback; los descriptor sets apuntan al
+  buffer de uniforms, por eso no se alternan buffers sino offsets). Se envía el
+  frame N sin esperar y se presenta el N-1. 4× + MSAA 8×: Vulkan+copia 10.4 → 2.2 ms,
+  sobran ~4.8 ms por frame (antes 0). Un frame más de latencia.
+- Siguiente en rendimiento: presentar con swapchain Vulkan (quita copia ~2 ms +
+  escalado por software ~2.4 ms a 4×), CPU de vértices (~5.5 ms), y opciones de
+  producción de CMake (LTO, fastpaths; recompilar las 20 units).
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
