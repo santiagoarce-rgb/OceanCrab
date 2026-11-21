@@ -553,8 +553,11 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   combo `controller+0x6C` (1..3) y velocidad máxima `controller+0xA4` (4.40 →
   2.60 atacando).
 - Cerrar la ventana ahora termina el juego limpio (antes `g_closed` no se leía).
-- Pendiente: nombrar estados 7/18 (¿qué hacen triángulo y círculo?), salud/vidas
-  (API Lua `Health`/`Lives`), y la cámara.
+- Salud: `controller+0x80` = 4 → 3 en el único golpe recibido (probablemente los
+  calzoncillos del HUD). Al entrar al nivel el objeto se reinicializa en la misma
+  dirección (no es una muerte).
+- Pendiente: confirmar salud con más golpes / una vida perdida, nombrar estados
+  7/18 (triángulo/círculo), vidas, enemigos (`CStdEnemyEnt`) y la cámara.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.

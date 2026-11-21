@@ -52,6 +52,7 @@ inline constexpr std::uint32_t kMoveState = 0x008u;        // u32, MoveState bel
 inline constexpr std::uint32_t kInputLatch = 0x048u;       // u32, buffered press (3 = attack) (likely)
 inline constexpr std::uint32_t kFlags = 0x064u;            // u32, Flag* below        (likely)
 inline constexpr std::uint32_t kCombo = 0x06Cu;            // u32 attack combo step 1..3 (confirmed)
+inline constexpr std::uint32_t kHealth = 0x080u;           // u32 4 = full; 4->3 on one hit (likely: HUD underwear)
 inline constexpr std::uint32_t kMaxSpeed = 0x0A4u;         // float 4.40, 2.60 while attacking (confirmed)
 inline constexpr std::uint32_t kAction = 0x0D0u;           // u32, action id below    (likely)
 inline constexpr std::uint32_t kWantedVelocity = 0x088u;   // float x,y,z            (likely)
@@ -75,6 +76,8 @@ inline constexpr std::uint32_t kFlagMoving = 0x10u;          // likely
 inline constexpr std::uint32_t kFlagOnGround = 0x40u;        // likely
 }  // namespace controller
 
+// Entering a level re-initialises the same object in place (fields zeroed,
+// position reset); the entity address does not change between hub and level.
 // Physics seen while jumping: velocity.y = +5.07 on take-off, +4.46 on the
 // double jump, then ~-0.25 per frame (gravity); ~-0.26 when standing.
 
