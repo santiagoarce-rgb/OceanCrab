@@ -82,6 +82,7 @@ struct RenderingConfiguration {
     std::uint32_t internal_width{960u};
     std::uint32_t internal_height{544u};
     std::uint32_t anisotropic_filtering{1u};
+    std::uint32_t draw_distance_scale{1u};  // multiplies the far plane of 3D projections
     std::uint32_t msaa{4u};
     std::uint32_t depth_precision{24u};
     std::uint32_t texture_cache_entries{8192u};

@@ -7,6 +7,7 @@
 #include "ge_diag.hpp"
 #include "spongebob_frame_limit.hpp"
 #include "spongebob_symbols.hpp"
+#include "spongebob_render_config.hpp"
 #include "game/spongebob_player.hpp"
 #include "game/spongebob_enemy.hpp"
 
@@ -190,6 +191,9 @@ void frame_profile_tick() {
     frame_profile.window_start = now;
 }
 
+// Last perspective projection used by a 3D draw (PSPRECOMP_PLAYER_LOG).
+std::array<float, 16> last_perspective_projection{};
+
 // Last pad state handed to the game (for PSPRECOMP_PLAYER_RECORD).
 std::uint32_t last_pad_buttons{};
 std::uint8_t last_pad_lx{128u}, last_pad_ly{128u};
@@ -291,9 +295,29 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
             break;
         case kGeCommandPrimitive: {
             ProfileScope prim_scope(frame_profile.ge_prim_ns);
+            if (ge_state.transform.projection[11] != 0.0f)  // perspective (w = -z)
+                last_perspective_projection = ge_state.transform.projection;
             GeRenderStats stats{};
             std::string error;
-            if (!render_ge_primitive(rt.memory(), ge_state.commands, ge_state.transform,
+            // Draw distance (Rendering.DrawDistance / F1 menu): push the far plane of
+            // perspective projections out by an integer factor, for rendering only.
+            // The projection is OpenGL-style: m22 = -(f+n)/(f-n), m32 = -2fn/(f-n).
+            const std::uint32_t far_scale = spongebob_render_configuration().rendering.draw_distance_scale;
+            const auto &projection = ge_state.transform.projection;
+            const bool extend_far = far_scale > 1u && projection[11] != 0.0f && projection[10] != -1.0f &&
+                                    projection[10] != 1.0f;
+            GeTransformState extended;
+            if (extend_far) {
+                extended = ge_state.transform;
+                const float a = projection[10], b = projection[14];
+                const float near_plane = b / (a - 1.0f), far_plane = b / (a + 1.0f);
+                if (near_plane > 0.0f && far_plane > near_plane && std::isfinite(far_plane)) {
+                    const float new_far = far_plane * static_cast<float>(far_scale);
+                    extended.projection[10] = -(new_far + near_plane) / (new_far - near_plane);
+                    extended.projection[14] = -2.0f * new_far * near_plane / (new_far - near_plane);
+                }
+            }
+            if (!render_ge_primitive(rt.memory(), ge_state.commands, extend_far ? extended : ge_state.transform,
                                      ge_state.vertex_address, ge_state.index_address,
                                      data, stats, error)) {
                 list.state = GeListState::Error;
@@ -1853,6 +1877,11 @@ void player_log_tick(psprecomp::Runtime &rt) {
                   rt.memory().load32(controller + g::controller::kHealth),
                   progress != 0u ? rt.memory().load32(progress + g::kProgressLives) : 0u,
                   progress != 0u ? rt.memory().load32(progress + g::kProgressScore) : 0u);
+    std::cerr << line << "\n";
+    // Projection in use (GE state): near/far can be derived from it.
+    const auto &p = last_perspective_projection;
+    std::snprintf(line, sizeof line, "[player]   projection m00=%.3f m11=%.3f m22=%.4f m23=%.4f m32=%.4f m33=%.4f",
+                  p[0], p[5], p[10], p[11], p[14], p[15]);
     std::cerr << line << "\n";
 }
 

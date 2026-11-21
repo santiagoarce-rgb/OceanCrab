@@ -103,6 +103,13 @@ void graphics_menu() {
                                std::to_string(rendering.anisotropic_filtering));
     restart_marker();
 
+    ImGui::SetNextItemWidth(200.0f);
+    if (value_combo("Draw distance", rendering.draw_distance_scale, std::array<std::uint32_t, 4>{1u, 2u, 4u, 8u},
+                    std::array<const char *, 4>{"1x  (original)", "2x", "4x", "8x"}))
+        save_spongebob_setting("Rendering", "DrawDistance", std::to_string(rendering.draw_distance_scale));
+    ImGui::SameLine();
+    ImGui::TextDisabled("(live)");
+
     ImGui::SeparatorText("Screen");
     bool smooth = display.upscale_filter == DisplayUpscaleFilter::Bilinear;
     if (ImGui::Checkbox("Smooth scaling (bilinear)", &smooth)) {

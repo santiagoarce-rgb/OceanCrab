@@ -282,6 +282,11 @@ void apply_rendering_key(SpongebobConfiguration &config, const std::string &key,
             warning(config, line, "Rendering.SMAA expects true/false");
         return;
     }
+    if (key == "drawdistance" || key == "drawdistancescale" || key == "farplanescale") {
+        if (!parse_u32(value, 1u, 16u, config.rendering.draw_distance_scale))
+            warning(config, line, "Rendering.DrawDistance must be between 1 and 16");
+        return;
+    }
     if (key == "anisotropicfiltering" || key == "anisotropy") {
         if (!parse_u32(value, 1u, 16u, config.rendering.anisotropic_filtering))
             warning(config, line, "Rendering.AnisotropicFiltering must be between 1 and 16");

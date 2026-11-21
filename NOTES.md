@@ -643,6 +643,18 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   escalado por software ~2.4 ms a 4×), CPU de vértices (~5.5 ms), y opciones de
   producción de CMake (LTO, fastpaths; recompilar las 20 units).
 
+## Sesión 2026-11-21 (11) — 🔭 distancia de dibujo (primera parte)
+
+- El motor lee `nearplane`/`farplane` en `CWCamera::vfunc_04` (`0x08967240`,
+  probablemente Load) y divide el mundo en celdas PVS (`CWPVSCell`).
+- Proyección 3D estilo OpenGL: hub near ≈ 0.2, far ≈ 85 (de m22/m32;
+  `PSPRECOMP_PLAYER_LOG` imprime la última perspectiva).
+- `Rendering.DrawDistance` (menú F1, en vivo): recalcula m22/m32 con far × N solo
+  para el render. Sin artefactos de profundidad a 8× en el hub.
+- Pendiente: probar en exteriores (nivel 1). Si no aparece nada nuevo, el motor
+  descarta objetos en CPU (frustum por far o PVS) y habrá que tocar el far de
+  `CWCamera` o el PVS.
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.
