@@ -44,7 +44,13 @@ constexpr const char *kPrimitiveNames[8] = {"points", "lines", "line_strip", "tr
                                             "tri_strip", "tri_fan", "rectangles", "prim7"};
 std::array<std::atomic<std::uint64_t>, 16> g_dropped_primitives{};  // [primitive + 8*through]
 std::array<std::atomic<std::uint64_t>, 8> g_unsupported_texture_functions{};
+std::array<std::atomic<std::uint64_t>, 16> g_gpu_lost_vertices{};  // points/lines, [primitive + 8*through]
 }  // namespace
+
+void ge_diag_count_gpu_lost_primitive(std::uint32_t primitive, bool through, std::size_t vertices) noexcept {
+    if (!ge_unsupported_diag_enabled()) return;
+    g_gpu_lost_vertices[(primitive & 7u) + (through ? 8u : 0u)].fetch_add(vertices, std::memory_order_relaxed);
+}
 
 bool ge_unsupported_diag_enabled() noexcept {
     static const bool enabled = std::getenv("PSPRECOMP_GE_UNSUPPORTED_DIAG") != nullptr;
@@ -71,6 +77,11 @@ void ge_diag_frame_tick() noexcept {
         const std::uint64_t n = g_dropped_primitives[i].exchange(0u, std::memory_order_relaxed);
         if (n == 0u) continue;
         line += std::string(" ") + kPrimitiveNames[i & 7u] + (i >= 8u ? "/2d" : "/3d") + "=" + std::to_string(n);
+    }
+    for (std::uint32_t i = 0u; i < 16u; ++i) {
+        const std::uint64_t n = g_gpu_lost_vertices[i].exchange(0u, std::memory_order_relaxed);
+        if (n == 0u) continue;
+        line += std::string(" gpu_lost_") + kPrimitiveNames[i & 7u] + (i >= 8u ? "/2d" : "/3d") + "_vertices=" + std::to_string(n);
     }
     for (std::uint32_t i = 0u; i < 8u; ++i) {
         const std::uint64_t n = g_unsupported_texture_functions[i].exchange(0u, std::memory_order_relaxed);
@@ -4620,6 +4631,11 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
         }
         (void)ge_gpu_backend_stage_vertices(gpu_draw, gpu_vertices);
     }
+
+    // Points and lines only go through the software rasterizer; with the
+    // Vulkan backend presenting its own frame they are never seen.
+    if (gpu_backend_enabled && primitive <= 2u && !vertices.empty())
+        ge_diag_count_gpu_lost_primitive(primitive, layout.through, vertices.size());
 
     switch (primitive) {
     case 0u:
