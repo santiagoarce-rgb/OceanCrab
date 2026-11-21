@@ -728,6 +728,78 @@ std::size_t blend_variant(const GeGpuDrawDescriptor &draw) noexcept {
     return 0u;
 }
 
+// General PSP blend -> Vulkan mapping for every enabled blend state that
+// blend_variant() does not special-case (those keep their tuned pipelines).
+// Bink's YUV->RGB, for one, adds chroma with FIX/FIX + ADD and removes it with
+// FIX/FIX + REVERSE_SUBTRACT; without this the subtract pass replaced the frame.
+struct GenericBlend {
+    bool active{};
+    VkBlendOp op{VK_BLEND_OP_ADD};
+    VkBlendFactor src{VK_BLEND_FACTOR_ONE};
+    VkBlendFactor dst{VK_BLEND_FACTOR_ZERO};
+    std::uint32_t constant{};  // 0x00BBGGRR when a factor uses CONSTANT_COLOR.
+    std::uint32_t key{};       // compact state for the pipeline key.
+};
+
+// Fixed-color factor: white/black map to ONE/ZERO exactly; anything else needs
+// the single Vulkan blend constant.
+enum class FixClass : std::uint32_t { One = 0u, Zero = 1u, Constant = 2u };
+FixClass fix_class(std::uint32_t color) noexcept {
+    color &= 0x00FFFFFFu;
+    if (color == 0x00FFFFFFu) return FixClass::One;
+    if (color == 0u) return FixClass::Zero;
+    return FixClass::Constant;
+}
+
+GenericBlend generic_blend(const GeGpuDrawDescriptor &draw) noexcept {
+    GenericBlend out{};
+    if (!draw.blend_enabled || draw.clear_mode || blend_variant(draw) != 0u) return out;
+    const std::uint32_t eq = draw.blend_equation & 7u;
+    const std::uint32_t src = draw.blend_source_factor & 0xFu;
+    const std::uint32_t dst = draw.blend_dest_factor & 0xFu;
+    const std::uint32_t fs = draw.blend_fix_source & 0x00FFFFFFu;
+    const std::uint32_t fd = draw.blend_fix_dest & 0x00FFFFFFu;
+    out.active = true;
+    switch (eq) {
+    case 1u: out.op = VK_BLEND_OP_SUBTRACT; break;          // src - dst
+    case 2u: out.op = VK_BLEND_OP_REVERSE_SUBTRACT; break;  // dst - src
+    case 3u: out.op = VK_BLEND_OP_MIN; break;               // factors ignored, as on PSP
+    case 4u: out.op = VK_BLEND_OP_MAX; break;
+    default: out.op = VK_BLEND_OP_ADD; break;               // 0 add; 5 abs-diff not expressible
+    }
+    bool constant_used = false;
+    const auto factor = [&](std::uint32_t code, bool source, std::uint32_t fix) -> VkBlendFactor {
+        switch (code) {
+        case 0u: return source ? VK_BLEND_FACTOR_DST_COLOR : VK_BLEND_FACTOR_SRC_COLOR;
+        case 1u: return source ? VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR : VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+        case 2u: case 6u: return VK_BLEND_FACTOR_SRC_ALPHA;            // 6: 2*srcA, approximated
+        case 3u: case 7u: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;  // 7: 1-2*srcA, approximated
+        case 4u: case 8u: return VK_BLEND_FACTOR_DST_ALPHA;
+        case 5u: case 9u: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+        default:  // 10 = fixed color (FIXA for source, FIXB for destination)
+            switch (fix_class(fix)) {
+            case FixClass::One: return VK_BLEND_FACTOR_ONE;
+            case FixClass::Zero: return VK_BLEND_FACTOR_ZERO;
+            case FixClass::Constant: break;
+            }
+            if (!constant_used) {
+                constant_used = true;
+                out.constant = fix;
+                return VK_BLEND_FACTOR_CONSTANT_COLOR;
+            }
+            // Second distinct fixed color: Vulkan has one constant.
+            if (((out.constant ^ fix) & 0x00FFFFFFu) == 0x00FFFFFFu) return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+            return VK_BLEND_FACTOR_CONSTANT_COLOR;  // approximation
+        }
+    };
+    out.src = factor(src, true, fs);
+    out.dst = factor(dst, false, fd);
+    out.key = 1u | (eq << 1u) | (src << 4u) | (dst << 8u) |
+              (static_cast<std::uint32_t>(fix_class(fs)) << 12u) |
+              (static_cast<std::uint32_t>(fix_class(fd)) << 14u);
+    return out;
+}
+
 VkColorComponentFlags color_write_mask(const GeGpuDrawDescriptor &draw) noexcept {
     VkColorComponentFlags mask = 0;
     for (std::uint32_t channel = 0u; channel < 4u; ++channel) {
@@ -760,6 +832,7 @@ std::uint64_t pipeline_key(const GeGpuDrawDescriptor &draw, bool strip, bool cul
     key |= static_cast<std::uint64_t>(strip ? 1u : 0u) << 16u;
     key |= static_cast<std::uint64_t>(cull ? 1u : 0u) << 17u;
     key |= static_cast<std::uint64_t>(ccw ? 1u : 0u) << 18u;
+    key |= static_cast<std::uint64_t>(generic_blend(draw).key) << 20u;
     return key;
 }
 
@@ -835,6 +908,16 @@ VkPipeline pipeline_for(VulkanState &s, const GeGpuDrawDescriptor &draw, bool st
     } else if (variant == 4u) {
         blend.srcColorBlendFactor = VK_BLEND_FACTOR_CONSTANT_COLOR;
         blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+    }
+    if (const GenericBlend generic = generic_blend(draw); generic.active) {
+        // PSP alpha holds stencil, not a blended value: keep the source alpha.
+        blend.blendEnable = VK_TRUE;
+        blend.srcColorBlendFactor = generic.src;
+        blend.dstColorBlendFactor = generic.dst;
+        blend.colorBlendOp = generic.op;
+        blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        blend.alphaBlendOp = VK_BLEND_OP_ADD;
     }
     VkPipelineColorBlendStateCreateInfo blending{};
     blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -2010,8 +2093,10 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
         scissor.extent.height = static_cast<std::uint32_t>(bottom - scissor.offset.y);
         vkCmdSetScissor(s.command, 0u, 1u, &scissor);
         float blend_constants[4]{};
-        if (blend_variant(batch.draw) == 4u) {
-            const std::uint32_t fix = batch.draw.blend_fix_source & 0x00FFFFFFu;
+        const GenericBlend generic = generic_blend(batch.draw);
+        if (blend_variant(batch.draw) == 4u || (generic.active && generic.constant != 0u)) {
+            const std::uint32_t fix = generic.active ? generic.constant
+                                                     : batch.draw.blend_fix_source & 0x00FFFFFFu;
             blend_constants[0] = static_cast<float>(fix & 0xFFu) / 255.0f;
             blend_constants[1] = static_cast<float>((fix >> 8u) & 0xFFu) / 255.0f;
             blend_constants[2] = static_cast<float>((fix >> 16u) & 0xFFu) / 255.0f;
