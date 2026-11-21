@@ -83,8 +83,9 @@ inline constexpr std::uint32_t kFlagMoving = 0x10u;          // likely
 inline constexpr std::uint32_t kFlagOnGround = 0x40u;        // likely
 }  // namespace controller
 
-// Entering a level re-initialises the same object in place (fields zeroed,
-// position reset); the entity address does not change between hub and level.
+// The entity can be re-created on a level change: one session reused the hub
+// object in place, another (after watching the credits) got a new object at a
+// different address. Always look it up through the session (find_player).
 // Physics seen while jumping: velocity.y = +5.07 on take-off, +4.46 on the
 // double jump, then ~-0.25 per frame (gravity); ~-0.26 when standing.
 
