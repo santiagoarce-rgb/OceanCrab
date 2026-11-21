@@ -41,7 +41,7 @@ The long-term goal is a full PC port in the spirit of community projects such as
 | Input | ✅ | Keyboard and gamepads (SDL2) |
 | File I/O | ✅ | `sceIo*` streaming from your extracted `PSP_GAME/USRDIR` |
 | Menus | ✅ | Main menu, Story Mode, Credits, Options |
-| Gameplay | 🚧 | **New Game** reaches the Krusty Krab hub; playability beyond that is untested |
+| Gameplay | 🚧 | Hub and first level load and are playable; attacking crashes; one object model is missing |
 | VFPU | 🚧 | Translated by the code generator; the instructions the Bink decoder uses all run. Remaining unlowered sites are being audited |
 | Bink videos | 🚧 | Intro videos decode and play through to the title screen; colors are wrong (luma only) |
 
@@ -49,6 +49,8 @@ The long-term goal is a full PC port in the spirit of community projects such as
 
 - **Bink colors.** The statically linked Bink decoder runs natively, but video frames have no blue channel (only red/green). The YUV → RGB path, or the video texture format in the GE, is under investigation.
 - **Bink audio.** The decoder's audio thread exits right after it starts, so videos are silent.
+- **Attack crash.** Pressing attack in the first level (robot fight) crashes.
+- **Game speed.** Gameplay runs faster than real time; frame pacing is not locked to the PSP's 60 Hz VBlank yet.
 
 `PSPRECOMP_SKIP_BIK=1` still replaces the video pipeline with stubs (a fake Bink header and a "finished" Movie object). It is no longer needed to reach the title screen, and the plan is to remove it.
 
