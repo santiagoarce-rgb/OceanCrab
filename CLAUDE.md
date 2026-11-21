@@ -84,8 +84,9 @@ marcarlos así.
 - Heap del motor: `CPSPSystem::InitializeHeap` usa `sceKernelMaxFreeMemSize() - 1 MiB`.
   La memoria libre se calcula de verdad (arena después del módulo, `0x08B70000`,
   hasta los stacks). `[0x08B61000, 0x08B70000)` es scratch del host.
-- Bink: colores correctos (blend genérico en Vulkan, `generic_blend()`). Abierto: sin audio
-  (el "Bink audio thread" termina apenas arranca).
+- Bink: colores correctos (blend genérico en Vulkan, `generic_blend()`) y **con audio**
+  (2026-11-21, verificado por el usuario): mutex reales, args de `StartThread` copiados
+  a la pila del hilo y `sceAudioOutput2*` implementado.
 - Bink corre nativo. Aún quedan ~1 950 sitios `vfpu*/cop2 not lowered` en el corpus; no se ejecutan
   en las intros, pero hay que auditarlos (¿código real o datos?).
 - Los hooks de `register_function` **deben** poner `ctx.pc = ctx.gpr[31]` al
@@ -164,7 +165,8 @@ marcarlos así.
 - `PSPRECOMP_DX12_*` — heredadas de VCS/DX12, no aplican en Linux.
 
 **Audio**
-- `PSPRECOMP_AUDIO_DIAG`, `PSPRECOMP_SAS_DIAG`, `PSPRECOMP_AUDIO_SUMMARY`
+- `PSPRECOMP_AUDIO_DIAG` (incluye bloques/pico de `sceAudioOutput2` por video), `PSPRECOMP_SAS_DIAG`, `PSPRECOMP_AUDIO_SUMMARY`
+- `PSPRECOMP_MUTEX_DIAG` — create/lock/unlock/bloqueos de los mutex del kernel
 - `PSPRECOMP_AUDIO_PREBUFFER_BLOCKS=<n>`, `PSPRECOMP_AUDIO_WAV=<ruta>` (graba la salida a WAV)
 
 **Host (`SPONGEBOB_*`)**: `SPONGEBOB_WINDOW_SCALE`, `SPONGEBOB_VULKAN_VALIDATION`,

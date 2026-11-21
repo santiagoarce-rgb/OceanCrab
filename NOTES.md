@@ -454,8 +454,27 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   Investigar en la fase 3 si la geometría 3D realmente se rasteriza al target
   escalado o si solo se escala la composición final.
 
+## Sesión 2026-11-21 (4) — 🔊 audio de Bink
+
+- El "Bink audio thread" (`0x089CCAE4`) hace en bucle
+  `sceKernelLockMutex("Bink shutdown Mutex", 1, timeout=5000)`: mientras le da
+  `WAIT_TIMEOUT` (el main lo tiene) decodifica y envía audio; si lo consigue, el
+  video terminó y sale. Los mutex eran stubs que devolvían 0 → salía al instante.
+  Fix (`bb9af3e`): mutex reales (dueño/cuenta, waiters FIFO, recursivo con attr
+  0x200, timeout por el camino de deadlines del scheduler). `PSPRECOMP_MUTEX_DIAG=1`.
+- El hilo de sonido del motor (`0x089E05C8`, mismo patrón con "Shutdown Mutex")
+  recibía `StartThread(uid, 4, sp)`: `argp` apuntaba al frame del main, ya
+  reutilizado cuando el hilo corría → mutex 0 → salía. Fix (`711826b`): copiar el
+  bloque de args a la pila del hilo nuevo, como el kernel real.
+- Bink sale por **`sceAudioOutput2*`** (canal SRC estéreo 44.1 kHz), que era un stub
+  mudo. Fix (`1efe63a`): Reserve/OutputBlocking/GetRestSample/Release, mezclado en
+  el canal 8 del host. Verificado: nick/thq/blt envían 38/73/64 bloques de 4096
+  (= 3.5/6.8/6.0 s, igual que los headers); el usuario lo escuchó en vivo.
+- Pendiente menor: el main hace `LockMutex(0)` en `0x089E0D0C` (struct sin mutex;
+  devuelve UNKNOWN_MUTEX, inofensivo por ahora). Los event flags siguen siendo stubs.
+- Ojo en pruebas: `timeout` (SIGTERM) no siempre mata el binario; usar `timeout -s KILL`.
+
 ## Próxima sesión
-1. **Audio de Bink**: el "Bink audio thread" (entrada `0x089CCAE4`) hace
-   `ExitDeleteThread` con status 0 apenas arranca, en todos los videos.
-2. Después: láseres del museo (líneas que no llegan a Vulkan), borrar hooks de
-   `PSPRECOMP_SKIP_BIK`, y la fase 2 (simbolización con ayuda de `PSPRECOMP_GAME_LOG`).
+1. Láseres del museo (líneas que no llegan a Vulkan).
+2. Borrar hooks de `PSPRECOMP_SKIP_BIK` y la fase 2 (simbolización con ayuda de
+   `PSPRECOMP_GAME_LOG`).
