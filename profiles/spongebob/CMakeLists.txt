@@ -23,6 +23,7 @@ set(SPONGEBOB_HOST_SOURCES
     host/spongebob_frame_limit.cpp
     host/spongebob_audio_output.cpp
     host/spongebob_sas.cpp
+    host/spongebob_menu.cpp
 )
 
 add_executable(SpongeBobNative ${SPONGEBOB_HOST_SOURCES})
@@ -50,6 +51,25 @@ else()
     target_compile_definitions(SpongeBobNative PRIVATE SPONGEBOB_VULKAN_GE_BACKEND=1)
     target_link_libraries(SpongeBobNative PRIVATE
         PkgConfig::SDL2 PkgConfig::VULKAN Threads::Threads)
+
+    # Dear ImGui (MIT) for the F1 enhancements menu, drawn with the SDL2 +
+    # SDL_Renderer backends on top of the presented frame. Pinned tag.
+    include(FetchContent)
+    FetchContent_Declare(imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.9b
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(imgui)
+    add_library(spongebob_imgui STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer2.cpp)
+    target_include_directories(spongebob_imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+    target_link_libraries(spongebob_imgui PUBLIC PkgConfig::SDL2)
+    target_link_libraries(SpongeBobNative PRIVATE spongebob_imgui)
 
     # Compile ge.vert/ge.frag to SPIR-V with glslangValidator and embed them as
     # a generated header (ge_spv.hpp) that ge_gpu_backend_vulkan.cpp includes.

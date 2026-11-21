@@ -6,6 +6,7 @@
 #include "spongebob_controls.hpp"
 #include "spongebob_mouse.hpp"
 #include "spongebob_render_config.hpp"
+#include "spongebob_menu.hpp"
 
 #include <SDL.h>
 
@@ -109,6 +110,7 @@ void toggle_fullscreen() noexcept {
 void pump_events() noexcept {
     SDL_Event event;
     while (SDL_PollEvent(&event) == 1) {
+        menu_handle_event(event);
         if (event.type == SDL_QUIT) g_closed = true;
         else if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F11 &&
                  event.key.repeat == 0)
@@ -177,11 +179,34 @@ void blit_rgba(const void *pixels, std::uint32_t width, std::uint32_t height, in
         g_texture_width = width;
         g_texture_height = height;
         if (g_texture != nullptr) SDL_SetTextureBlendMode(g_texture, SDL_BLENDMODE_NONE);
+        menu_set_game_texture(g_texture);  // applies the live upscale filter
     }
     if (g_texture == nullptr) return;
     SDL_UpdateTexture(g_texture, nullptr, pixels, pitch);
     SDL_RenderClear(g_renderer);
-    SDL_RenderCopy(g_renderer, g_texture, nullptr, nullptr);
+    // Honour Display.AspectRatio / IntegerScale (the image used to be stretched).
+    int output_width = 0, output_height = 0;
+    SDL_GetRendererOutputSize(g_renderer, &output_width, &output_height);
+    const DisplayConfiguration &display = spongebob_render_configuration().display;
+    const PresentationRectangle rect = calculate_presentation_rectangle(
+        static_cast<std::uint32_t>(std::max(output_width, 0)), static_cast<std::uint32_t>(std::max(output_height, 0)),
+        width, height,
+        display.aspect_mode, display.integer_scale);
+    const SDL_Rect destination{rect.x, rect.y, rect.width, rect.height};
+    SDL_RenderCopy(g_renderer, g_texture, nullptr, rect.width > 0 ? &destination : nullptr);
+    menu_render();
+    // PSPRECOMP_WINDOW_SHOT=<file.bmp>: save the composed window (game + menu)
+    // once, at the 600th presented frame. Lets headless runs check the F1 menu.
+    static int presented = 0;
+    if (const char *shot = std::getenv("PSPRECOMP_WINDOW_SHOT"); shot != nullptr && ++presented == 600) {
+        if (SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(0, output_width, output_height, 32,
+                                                                  SDL_PIXELFORMAT_ARGB8888)) {
+            if (SDL_RenderReadPixels(g_renderer, nullptr, SDL_PIXELFORMAT_ARGB8888, surface->pixels,
+                                     surface->pitch) == 0)
+                SDL_SaveBMP(surface, shot);
+            SDL_FreeSurface(surface);
+        }
+    }
     SDL_RenderPresent(g_renderer);
 }
 
@@ -223,7 +248,7 @@ void display_window_init() {
     }
     const bool nearest = spongebob_render_configuration().display.upscale_filter == DisplayUpscaleFilter::Nearest;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, nearest ? "0" : "1");
-    g_window = SDL_CreateWindow("SpongebobNative - GTA: Liberty City Stories",
+    g_window = SDL_CreateWindow("Ocean Crab - SpongeBob's Truth or Square (F1: menu)",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                 480 * scale, 272 * scale,
                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN);
@@ -239,6 +264,7 @@ void display_window_init() {
         return;
     }
     SDL_SetRenderDrawColor(g_renderer, 0, 0, 0, 255);
+    menu_init(g_window, g_renderer);
     SDL_RenderClear(g_renderer);
     SDL_RenderPresent(g_renderer);
     SDL_ShowWindow(g_window);
@@ -271,7 +297,7 @@ bool display_window_profile_key_pressed() {
     return pressed;
 }
 
-bool display_window_closed() { return g_closed; }
+bool display_window_closed() { return g_closed || menu_quit_requested(); }
 
 void display_window_pump() {
     std::lock_guard<std::mutex> guard(g_sdl_mutex);
@@ -316,6 +342,7 @@ void display_window_present_rgba(std::span<const std::byte> rgba, std::uint32_t 
 void display_window_shutdown() {
     std::lock_guard<std::mutex> guard(g_sdl_mutex);
     close_pad();
+    menu_shutdown();
     if (g_texture != nullptr) {
         SDL_DestroyTexture(g_texture);
         g_texture = nullptr;
@@ -356,6 +383,11 @@ HostInputState display_window_input() {
     const bool in_game = spongebob_camera_in_use();
     const bool minimized = g_window != nullptr &&
                            (SDL_GetWindowFlags(g_window) & SDL_WINDOW_MINIMIZED) != 0;
+    // While the F1 menu is open the game gets no input and the mouse is free.
+    if (menu_open()) {
+        if (SDL_GetRelativeMouseMode() == SDL_TRUE) SDL_SetRelativeMouseMode(SDL_FALSE);
+        return publish();
+    }
     const bool capture = focused && in_game && !minimized && spongebob_camera_hook_enabled();
     if ((SDL_GetRelativeMouseMode() == SDL_TRUE) != capture)
         SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
