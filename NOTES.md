@@ -517,6 +517,12 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   del juego (`CTikiEnt`, `CLaserEnt`, `CBombEnt`…); `CSBWorld` → `CWSceneMesh` →
   `CWWorld` → `CWScene`; armas `CWPWeaponBase` (11); enemigos
   `CStdEnemyControl` (11); UI `CLayerBase` (30).
+- Runtime con nombres: `psprecomp/symbolizer.hpp` (fuera de `runtime.hpp` a
+  propósito: tocarlo recompila las 20 units). Crash dumps, `TRACE_ON_ERROR` y
+  `GAME_LOG` muestran `Clase::Método+0xN`. `sub_0890D7C8` = init del motor
+  ("Whiptail Engine Version 1.1.0 Initializing").
+- Tip: si un `git checkout` toca `runtime.hpp`, `touch -r` con un header viejo
+  evita la recompilación completa (Ninja usa mtime).
 - Siguiente: nombrar el jugador (`CCharEntBase`/`CCharControlBase`), la cámara
   (`CWStandardCamera`) y el cargador de niveles (`CWWorld::LoadManifest`
   `0x088143FC`) en Ghidra con `ImportSymbols.java`, y pasar los nombres al runtime

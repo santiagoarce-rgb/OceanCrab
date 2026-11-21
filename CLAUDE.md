@@ -142,6 +142,8 @@ que marcarlos así.
 - `PSPRECOMP_GE_SKIP_TEXTURE=<addr,...>` — omite los draws con esas texturas (identificar objetos).
 - `PSPRECOMP_GE_DUMP_TEXTURE=<addr>[,dir]` — vuelca la textura decodificada a `.pam`.
 - `PSPRECOMP_GAME_LOG` — imprime el log de debug del motor (`[game] ...`). **Primer recurso para depurar.**
+  Cada línea termina con la función que la imprimió (símbolos de fase 2).
+- `PSPRECOMP_SYMBOLS=<csv>` — mapa de símbolos para crash dumps/trazas (default `analysis/symbols/symbols.csv`; `0` lo apaga).
 - `PSPRECOMP_MAX_DISPATCHES` — tope de dispatches (default 4 000 000 000).
 - `PSPRECOMP_SPIN_YIELD_TICKS` — ticks con el mismo PC antes de forzar yield (default 4).
 

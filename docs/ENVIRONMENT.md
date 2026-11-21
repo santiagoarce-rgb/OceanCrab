@@ -51,6 +51,7 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_PROFILE_DISPATCH`, `..._START`, `..._COUNT` | Profile a window of dispatches. |
 | `PSPRECOMP_HLE_HISTOGRAM` | Print a histogram of HLE calls by NID. |
 | `PSPRECOMP_MUTEX_DIAG` | Log kernel mutex create/lock/unlock and every blocking lock. |
+| `PSPRECOMP_SYMBOLS=<csv>` | Symbol map used to print names in crash dumps, `PSPRECOMP_TRACE_ON_ERROR` and `PSPRECOMP_GAME_LOG` (default `profiles/spongebob/analysis/symbols/symbols.csv`; `0` disables). |
 | `PSPRECOMP_CHAIN_DEPTH=<n>` | Limit direct chaining between generated units. |
 | `PSPRECOMP_NO_CHAIN` | Disable direct chaining (every call goes through the dispatcher). |
 | `PSPRECOMP_WATCH_WRITE=<addr>`, `PSPRECOMP_WATCH_WRITE_SIZE=<n>` | Report writes to a guest memory range. |
