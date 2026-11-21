@@ -705,6 +705,10 @@ DrawUniforms make_uniforms(const Batch &batch, std::uint32_t logical_width, std:
     constants.pixel0[3] = (draw.fog_color & 0x00FFFFFFu) |
                           (static_cast<std::uint32_t>(draw.fog_enabled ? 0xFFu : 0u) << 24u);
     constants.pixel1[0] = draw.framebuffer_format & 3u;
+    // Blending reads the fragment's full alpha (SRC_ALPHA); only the stored
+    // value is reduced to the framebuffer format. Tells the shader to skip
+    // the alpha quantization so 5551 targets don't blend with a 0/1 alpha.
+    constants.pixel1[1] = (draw.blend_enabled && !draw.clear_mode) ? 1u : 0u;
     return constants;
 }
 

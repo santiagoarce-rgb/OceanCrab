@@ -67,8 +67,9 @@ float quantize(float value, float levels) {
     return floor(clamp(value, 0.0, 1.0) * levels + 0.5) / levels;
 }
 
-vec4 quantizeFramebuffer(vec4 color, uint format) {
+vec4 quantizeFramebuffer(vec4 color, uint format, bool blending) {
     color = clamp(color, 0.0, 1.0);
+    float sourceAlpha = color.a;
     uint kind = format & 3u;
     if (kind == 0u) {
         color.r = quantize(color.r, 31.0);
@@ -86,6 +87,9 @@ vec4 quantizeFramebuffer(vec4 color, uint format) {
         color.b = quantize(color.b, 15.0);
         color.a = quantize(color.a, 15.0);
     }
+    // The blend unit consumes the unquantized source alpha (PSP behavior).
+    // Cutting it first made soft alpha (clouds, glows) blend as 0/1.
+    if (blending) color.a = sourceAlpha;
     return color;
 }
 
@@ -113,5 +117,5 @@ void main() {
         uint mask = alphaControl.w;
         if (!alphaPass(alphaControl.y, a & mask, alphaControl.z & mask)) discard;
     }
-    outColor = quantizeFramebuffer(color, u.pixel1.x);
+    outColor = quantizeFramebuffer(color, u.pixel1.x, u.pixel1.y != 0u);
 }
