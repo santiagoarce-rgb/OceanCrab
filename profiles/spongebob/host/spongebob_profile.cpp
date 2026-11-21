@@ -1209,9 +1209,23 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
 void dump_frame_if_requested(std::span<const std::byte> rgba, std::uint32_t width, std::uint32_t height) {
     const char *dir = std::getenv("PSPRECOMP_DUMP_FRAME");
     if (dir == nullptr || dir[0] == '\0') return;
-    static const std::uint64_t kTargets[] = {1u, 40u, 80u, 120u, 160u, 190u, 400u, 800u, 1200u, 1600u};
+    // PSPRECOMP_DUMP_FRAME_AT=<n,n,...> overrides the default frame numbers.
+    static const std::vector<std::uint64_t> targets = [] {
+        std::vector<std::uint64_t> list;
+        if (const char *at = std::getenv("PSPRECOMP_DUMP_FRAME_AT"); at != nullptr) {
+            for (const char *p = at; *p != '\0';) {
+                char *end = nullptr;
+                const unsigned long long value = std::strtoull(p, &end, 10);
+                if (end == p) { ++p; continue; }
+                list.push_back(value);
+                p = end;
+            }
+        }
+        if (list.empty()) list = {1u, 40u, 80u, 120u, 160u, 190u, 400u, 800u, 1200u, 1600u};
+        return list;
+    }();
     bool dump = false;
-    for (const std::uint64_t target : kTargets) {
+    for (const std::uint64_t target : targets) {
         if (frame_present_count == target) { dump = true; break; }
     }
     if (!dump || rgba.empty() || width == 0u || height == 0u) return;
