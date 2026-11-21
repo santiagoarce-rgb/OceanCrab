@@ -39,17 +39,45 @@ inline constexpr std::uint32_t kBoundsMin = 0x458u;        // float x,y,z       
 inline constexpr std::uint32_t kBoundsMax = 0x464u;        // float x,y,z            (likely)
 inline constexpr std::uint32_t kController = 0x470u;       // embedded CSpongeBobController
 inline constexpr std::uint32_t kMorph = 0x7C0u;            // embedded CWMorphController
+inline constexpr std::uint32_t kAttackBlend = 0x7D4u;      // float 0->1 during attacks (likely: morph weight)
 inline constexpr std::uint32_t kPreviousPosition = 0x764u; // float x,y,z, one frame behind (likely)
 inline constexpr std::uint32_t kEffects = 0x8ECu;          // embedded CEffectHandler
 }  // namespace player
 
 // CSpongeBobController (ctor 0x08854E44), offsets relative to the controller.
+// States, flags and combo were mapped from a recorded play session
+// (PSPRECOMP_PLAYER_RECORD + tools/symbolize/player_record.py).
 namespace controller {
+inline constexpr std::uint32_t kMoveState = 0x008u;        // u32, MoveState below    (confirmed)
+inline constexpr std::uint32_t kInputLatch = 0x048u;       // u32, buffered press (3 = attack) (likely)
+inline constexpr std::uint32_t kFlags = 0x064u;            // u32, Flag* below        (likely)
+inline constexpr std::uint32_t kCombo = 0x06Cu;            // u32 attack combo step 1..3 (confirmed)
+inline constexpr std::uint32_t kMaxSpeed = 0x0A4u;         // float 4.40, 2.60 while attacking (confirmed)
+inline constexpr std::uint32_t kAction = 0x0D0u;           // u32, action id below    (likely)
 inline constexpr std::uint32_t kWantedVelocity = 0x088u;   // float x,y,z            (likely)
 inline constexpr std::uint32_t kStickMagnitude = 0x094u;   // float 0..1             (confirmed)
 inline constexpr std::uint32_t kWantedYaw = 0x098u;        // float radians          (likely)
 inline constexpr std::uint32_t kYaw = 0x09Cu;              // float radians          (likely)
+
+enum MoveState : std::uint32_t {
+    kIdle = 0u,
+    kWalk = 1u,
+    kAirborne = 3u,     // jump / double jump / falling
+    kTriangle = 7u,     // triangle-button action (name pending)
+    kAttack = 9u,       // square: karate combo
+    kState0C = 12u,     // unknown
+    kCircle = 18u,      // circle-button action (name pending)
+};
+// kAction ids seen: 0 idle, 1 walk, 0x13 jump, 0x17 double jump, 0x11/0x15 airborne,
+// 0x10 landing?, 9 attack, 2/3 triangle, 4 circle, 0xC on ground after an attack.
+inline constexpr std::uint32_t kFlagDoubleJumpUsed = 0x04u;  // likely
+inline constexpr std::uint32_t kFlagMoving = 0x10u;          // likely
+inline constexpr std::uint32_t kFlagOnGround = 0x40u;        // likely
 }  // namespace controller
+
+// Physics seen while jumping: velocity.y = +5.07 on take-off, +4.46 on the
+// double jump, then ~-0.25 per frame (gravity); ~-0.26 when standing.
+
 
 // Returns the live player entity, or 0 when no level is loaded.
 [[nodiscard]] inline std::uint32_t find_player(const psprecomp::GuestMemory &memory) {

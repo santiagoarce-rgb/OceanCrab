@@ -545,8 +545,16 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   `CWAnimated::vfunc_30`.
 - En headless, el jugador aparece hacia el frame presentado ~3000–4900 según la
   corrida (la cinemática de New Game dura); el control responde poco después.
-- Pendiente: salto (no visto con muestreo de 1 s), estados del personaje,
-  salud/vidas (API Lua `Health`/`Lives`), y la cámara.
+- Sesión jugada por el usuario (nivel 1) grabada con `PSPRECOMP_PLAYER_RECORD`
+  y cruzada con `tools/symbolize/player_record.py`: salto (vy +5.07, doble +4.46,
+  gravedad ~0.25/frame), estado de movimiento `controller+0x08` (0 quieto, 1
+  camina, 3 aire, 7 triángulo, 9 ataque, 18 círculo), acción `controller+0xD0`,
+  flags `controller+0x64` (0x40 suelo, 0x10 moviéndose, 0x04 doble salto usado),
+  combo `controller+0x6C` (1..3) y velocidad máxima `controller+0xA4` (4.40 →
+  2.60 atacando).
+- Cerrar la ventana ahora termina el juego limpio (antes `g_closed` no se leía).
+- Pendiente: nombrar estados 7/18 (¿qué hacen triángulo y círculo?), salud/vidas
+  (API Lua `Health`/`Lives`), y la cámara.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
