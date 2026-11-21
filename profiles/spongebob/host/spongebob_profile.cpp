@@ -848,14 +848,17 @@ void dump_thread_state() {
 bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx);
 
 // Cooperative yield: park the current thread back on the Ready queue (resuming
-// after the HLE call at $ra) and switch to the next runnable thread. This is the
+// at the exact guest PC) and switch to the next runnable thread. This is the
 // Wii "blr yield" analogue — without it, a spinner that never blocks would drain
 // the Ready queue and leave every thread stranded in "Running" state.
 void yield_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
     if (auto it = thread_table.threads.find(thread_table.current_uid);
         it != thread_table.threads.end()) {
+        // Called from the starvation hook, i.e. at an arbitrary guest point
+        // (dispatch/chain boundary), not from an HLE import: ctx.pc is the exact
+        // resume point. Resuming at $ra instead forced a premature return from
+        // the current function (e.g. Bink's decoder loop, ending in a jump to 0).
         it->second.context = ctx;
-        it->second.context.pc = ctx.gpr[31];   // resume after the HLE call.
         it->second.state = ThreadState::Ready;
         thread_table.ready_queue.push_back(it->second.uid);
     }
