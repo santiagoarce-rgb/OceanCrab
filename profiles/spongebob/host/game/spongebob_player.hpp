@@ -73,7 +73,8 @@ enum MoveState : std::uint32_t {
     kAirborne = 3u,     // jump / double jump / falling
     kSpatula = 7u,      // triangle: spatula attack
     kSpinSlap = 9u,     // square: spin slap (chains up to 3, see kCombo)
-    kState0C = 12u,     // unknown
+    kHurt = 12u,        // knocked back by an enemy strike (seen at the strike frame)
+    kHurtAlt = 15u,     // also seen right after an enemy strike (variant, unconfirmed)
     kWaterBalloon = 18u,  // circle: throw a water balloon
 };
 // kAction ids seen: 0 idle, 1 walk, 0x13 jump, 0x17 double jump, 0x11/0x15 airborne,

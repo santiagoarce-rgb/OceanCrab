@@ -574,7 +574,15 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   ~4.5°/frame, y elevación con tope ~-4.4°; el jugador se detiene: 0.20 vs 3.57 u/s),
   L recentra. Distancia `+0x1D0`; no hay ángulos guardados: el estado es la propia
   posición del ojo. El nivel volvió a crear cámara y jugador en direcciones nuevas.
-- Pendiente: vidas/puntos en una grabación, enemigos (`CStdEnemyEnt`).
+- Enemigos (`enemigos.bin`, nivel 1): `CStdEnemyEnt` (0x484 B) comparte base con el
+  jugador (posición `+0xE8`); `ent+0x470` → `CStdEnemyControl` (objeto aparte),
+  `control+0x10` → entidad. Salud `control+0x54` (2 → 0; la espátula mató a 3, a
+  veces en un golpe). Ataque `control+0xB8` 0/1 preparando/2 golpe, a 1–2.5 u del
+  jugador; al golpear, el jugador entra en estado 12 (daño), a veces 15. Los NPCs del
+  hub son `CStdEnemyEnt` con `CDummyControl`. Layout en `host/game/spongebob_enemy.hpp`.
+- Ojo: un objeto liberado conserva su vtable; el escaneo por vtable también los
+  encuentra (61 "enemigos" en el nivel, 16 se movieron).
+- Pendiente: vidas/puntos en una grabación, otros tipos de enemigo, la IA.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
