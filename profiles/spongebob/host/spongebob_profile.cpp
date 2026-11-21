@@ -7,11 +7,13 @@
 #include "ge_diag.hpp"
 #include "spongebob_frame_limit.hpp"
 #include "spongebob_symbols.hpp"
+#include "game/spongebob_player.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/guest_memory.hpp"
 #include "psprecomp/runtime.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -453,9 +455,14 @@ void register_other_stubs(psprecomp::Runtime &rt) {
         std::uint32_t buttons = input.buttons;
         if (const char *sim = std::getenv("PSPRECOMP_SIMULATE_BUTTON"))
             buttons |= static_cast<std::uint32_t>(std::strtoul(sim, nullptr, 0));
-        // PSPRECOMP_INPUT_SCRIPT="first-last=mask,..." holds `mask` pressed during
-        // presented frames [first, last], so menus see press/release edges.
-        struct ScriptedPress { std::uint64_t first, last; std::uint32_t mask; };
+        // PSPRECOMP_INPUT_SCRIPT="first-last=mask[@lx:ly],..." holds `mask` pressed
+        // (and optionally the left stick at lx,ly; 128 = centre) during presented
+        // frames [first, last], so menus see press/release edges.
+        struct ScriptedPress {
+            std::uint64_t first, last;
+            std::uint32_t mask;
+            int lx = -1, ly = -1;
+        };
         static const std::vector<ScriptedPress> script = [] {
             std::vector<ScriptedPress> list;
             const char *text = std::getenv("PSPRECOMP_INPUT_SCRIPT");
@@ -470,21 +477,29 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                 p = end + 1;
                 press.mask = static_cast<std::uint32_t>(std::strtoul(p, &end, 0));
                 if (end == p) break;
+                if (*end == '@') {
+                    press.lx = static_cast<int>(std::strtol(end + 1, &end, 0));
+                    if (*end == ':') press.ly = static_cast<int>(std::strtol(end + 1, &end, 0));
+                }
                 list.push_back(press);
                 p = (*end == ',') ? end + 1 : end;
             }
             return list;
         }();
+        std::uint8_t analog_x = input.analog_x, analog_y = input.analog_y;
         for (const ScriptedPress &press : script) {
-            if (frame_present_count >= press.first && frame_present_count <= press.last)
+            if (frame_present_count >= press.first && frame_present_count <= press.last) {
                 buttons |= press.mask;
+                if (press.lx >= 0) analog_x = static_cast<std::uint8_t>(std::clamp(press.lx, 0, 255));
+                if (press.ly >= 0) analog_y = static_cast<std::uint8_t>(std::clamp(press.ly, 0, 255));
+            }
         }
         for (std::uint32_t i = 0u; i < count; ++i) {
             const std::uint32_t sample = destination + i * kSampleSize;
             rt.memory().store32(sample, 0u);              // TimeStamp
             rt.memory().store32(sample + 4u, buttons);    // Buttons (PSP bitmask)
-            rt.memory().store8(sample + 8u, input.analog_x);  // Lx
-            rt.memory().store8(sample + 9u, input.analog_y);  // Ly
+            rt.memory().store8(sample + 8u, analog_x);  // Lx
+            rt.memory().store8(sample + 9u, analog_y);  // Ly
             rt.memory().store8(sample + 10u, 128u);           // rx
             rt.memory().store8(sample + 11u, 128u);           // ry
             rt.memory().zero(sample + 12u, 4u);               // Rsrv
@@ -1659,10 +1674,82 @@ void register_audio_hle(psprecomp::Runtime &rt) {
         });
 }
 
+// PSPRECOMP_OBJECT_DUMP=<vtable>:<size>:<every N frames>[:dir] — phase-2 aid.
+// Every N presented frames (the PSPRECOMP_INPUT_SCRIPT clock), find live objects whose first word is <vtable> (heap and
+// stacks, [0x08B70000, 0x0A000000)) and write <size> bytes of each to
+// <dir>/obj_<addr>_<frame>.bin. Diffing dumps across frames reveals fields
+// (position, velocity, state) of an engine class.
+// PSPRECOMP_PLAYER_LOG=1: once per second, follow the game-session pointer to
+// the player and print its position, yaw and velocity (validates the phase-2
+// layout in game/spongebob_player.hpp).
+void player_log_tick(psprecomp::Runtime &rt) {
+    static const bool enabled = std::getenv("PSPRECOMP_PLAYER_LOG") != nullptr;
+    static std::uint64_t last_frame = 0u;
+    if (!enabled || frame_present_count < last_frame + 60u) return;
+    last_frame = frame_present_count;
+    namespace g = spongebob::game;
+    const std::uint32_t entity = g::find_player(rt.memory());
+    if (entity == 0u) return;
+    const auto f = [&](std::uint32_t offset) {
+        const std::uint32_t bits = rt.memory().load32(entity + offset);
+        float value;
+        std::memcpy(&value, &bits, sizeof value);
+        return value;
+    };
+    char line[200];
+    std::snprintf(line, sizeof line,
+                  "[player] frame=%llu ent=0x%08X pos=(%.2f, %.2f, %.2f) yaw=%.2f vel=(%.2f, %.2f, %.2f) stick=%.2f",
+                  static_cast<unsigned long long>(frame_present_count), entity,
+                  f(g::player::kPosition), f(g::player::kPosition + 4u), f(g::player::kPosition + 8u),
+                  f(g::player::kYaw), f(g::player::kVelocity), f(g::player::kVelocity + 4u),
+                  f(g::player::kVelocity + 8u),
+                  f(g::player::kController + g::controller::kStickMagnitude));
+    std::cerr << line << "\n";
+}
+
+void object_dump_tick(psprecomp::Runtime &rt) {
+    static const struct Config {
+        std::uint32_t vtable{}, size{}, every{};
+        std::string dir;
+    } config = [] {
+        Config c;
+        const char *env = std::getenv("PSPRECOMP_OBJECT_DUMP");
+        if (env == nullptr) return c;
+        char *end = nullptr;
+        c.vtable = static_cast<std::uint32_t>(std::strtoul(env, &end, 0));
+        if (end != nullptr && *end == ':') c.size = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 0));
+        if (end != nullptr && *end == ':') c.every = static_cast<std::uint32_t>(std::strtoul(end + 1, &end, 0));
+        c.dir = (end != nullptr && *end == ':') ? std::string(end + 1) : std::string(".");
+        if (c.size == 0u) c.size = 0x400u;
+        if (c.every == 0u) c.every = 60u;
+        return c;
+    }();
+    static std::uint64_t last_frame = ~std::uint64_t{0};
+    if (config.vtable == 0u || frame_present_count % config.every != 0u ||
+        frame_present_count == last_frame) return;
+    last_frame = frame_present_count;
+    constexpr std::uint32_t kScanBegin = 0x08B70000u, kScanEnd = 0x0A000000u;
+    const std::uint8_t *ram = rt.memory().raw_pointer(kScanBegin, kScanEnd - kScanBegin);
+    if (ram == nullptr) return;
+    for (std::uint32_t off = 0u; off + config.size <= kScanEnd - kScanBegin; off += 4u) {
+        std::uint32_t word;
+        std::memcpy(&word, ram + off, 4u);
+        if (word != config.vtable) continue;
+        const std::string path = config.dir + "/obj_" + psprecomp::hex32(kScanBegin + off) + "_" +
+                                 std::to_string(frame_present_count) + ".bin";
+        if (std::FILE *f = std::fopen(path.c_str(), "wb")) {
+            std::fwrite(ram + off, 1u, config.size, f);
+            std::fclose(f);
+        }
+    }
+}
+
 void register_display_hle(psprecomp::Runtime &rt) {
     // sceDisplayWaitVblank* — park the caller until the next virtual VBlank.
     const auto wait_vblank = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
         ++vblank_wait_count;
+        object_dump_tick(rt);
+        player_log_tick(rt);
         if (vblank_wait_count % 100u == 0u) {
             std::cerr << "[display] wait_vblank count=" << vblank_wait_count
                       << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
