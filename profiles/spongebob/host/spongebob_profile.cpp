@@ -749,6 +749,9 @@ struct ThreadRecord {
     std::uint32_t exit_status{};
     std::uint64_t wake_at_us{};  // 0 == not waiting; else virtual-time wake deadline.
     std::uint32_t waiting_on_thread{0u};  // 0 == not waiting on a thread; else uid being waited on.
+    std::uint32_t waiting_on_mutex{0u};   // 0 == not blocked in LockMutex; else mutex uid.
+    std::uint32_t mutex_lock_count{0u};   // count requested by the blocked LockMutex.
+    std::uint32_t timeout_ptr{0u};        // guest SceUInt* of a timed wait (0 == none).
 };
 
 struct ThreadTable {
@@ -763,6 +766,31 @@ struct ThreadTable {
 };
 
 ThreadTable thread_table{};
+
+// Kernel mutexes (sceKernelCreateMutex & co). Bink's audio helper thread uses
+// one as its stop signal: it polls LockMutex with a 5 ms timeout and keeps
+// decoding while it gets WAIT_TIMEOUT; acquiring it means "movie over, exit".
+// A stub that always succeeds made the thread exit at once (silent movies).
+struct KernelMutex {
+    std::string name;
+    std::uint32_t attr{};
+    std::uint32_t owner{0u};  // thread uid, 0 == unlocked.
+    std::uint32_t count{0u};
+    std::vector<std::uint32_t> waiters;  // FIFO of blocked thread uids.
+};
+std::map<std::uint32_t, KernelMutex> kernel_mutexes;
+std::uint32_t next_mutex_uid = 0x100u;
+
+constexpr std::uint32_t kErrorWaitTimeout = 0x800201A8u;
+constexpr std::uint32_t kErrorWaitDelete = 0x800201B5u;
+constexpr std::uint32_t kErrorUnknownMutex = 0x800201C3u;
+constexpr std::uint32_t kErrorMutexLocked = 0x800201C4u;
+constexpr std::uint32_t kErrorMutexUnlockUnderflow = 0x800201C7u;
+constexpr std::uint32_t kErrorMutexRecursive = 0x800201C8u;
+constexpr std::uint32_t kMutexAttrRecursive = 0x200u;
+// Guest memory for writing back *timeout when a timed wait expires inside the
+// scheduler (no Runtime there). Set by register_mutex_hle.
+psprecomp::GuestMemory *g_mutex_memory = nullptr;
 
 struct PartitionBlock {
     std::string name;
@@ -913,6 +941,17 @@ void promote_expired_delays() {
     for (auto &[uid, record] : thread_table.threads) {
         if (record.state == ThreadState::Waiting && record.wake_at_us != 0u &&
             record.wake_at_us <= virtual_time_us) {
+            if (record.waiting_on_mutex != 0u) {
+                // Timed LockMutex expired: leave the wait queue, report timeout.
+                if (auto m = kernel_mutexes.find(record.waiting_on_mutex); m != kernel_mutexes.end())
+                    std::erase(m->second.waiters, uid);
+                record.waiting_on_mutex = 0u;
+                record.context.gpr[2] = kErrorWaitTimeout;
+            }
+            if (record.timeout_ptr != 0u) {
+                if (g_mutex_memory != nullptr) g_mutex_memory->store32(record.timeout_ptr, 0u);
+                record.timeout_ptr = 0u;
+            }
             record.state = ThreadState::Ready;
             record.wake_at_us = 0u;
             thread_table.ready_queue.push_back(uid);
@@ -1114,6 +1153,164 @@ void register_sysmem_hle(psprecomp::Runtime &rt) {
         });
 }
 
+// sceKernel*Mutex. Semantics follow the PSP kernel (and PPSSPP): FIFO waiters,
+// ownership handed to the first waiter on the final unlock, recursion only with
+// attr 0x200, and a timed lock returns WAIT_TIMEOUT with *timeout set to 0.
+bool try_take_mutex(KernelMutex &m, std::uint32_t uid, std::uint32_t count, std::uint32_t &error) {
+    if (m.owner == 0u) {
+        m.owner = uid;
+        m.count = count;
+        return true;
+    }
+    if (m.owner == uid) {
+        if ((m.attr & kMutexAttrRecursive) == 0u) { error = kErrorMutexRecursive; return false; }
+        m.count += count;
+        return true;
+    }
+    error = kErrorMutexLocked;
+    return false;
+}
+
+void hand_off_mutex(KernelMutex &m) {
+    m.owner = 0u;
+    m.count = 0u;
+    while (!m.waiters.empty()) {
+        const std::uint32_t uid = m.waiters.front();
+        m.waiters.erase(m.waiters.begin());
+        const auto it = thread_table.threads.find(uid);
+        if (it == thread_table.threads.end() || it->second.state != ThreadState::Waiting) continue;
+        ThreadRecord &rec = it->second;
+        m.owner = uid;
+        m.count = rec.mutex_lock_count;
+        rec.waiting_on_mutex = 0u;
+        rec.wake_at_us = 0u;
+        rec.timeout_ptr = 0u;  // *timeout keeps its value; good enough (time left is unused).
+        rec.context.gpr[2] = 0u;
+        rec.state = ThreadState::Ready;
+        thread_table.ready_queue.push_back(uid);
+        return;
+    }
+}
+
+void register_mutex_hle(psprecomp::Runtime &rt) {
+    g_mutex_memory = &rt.memory();
+    static const bool diag = std::getenv("PSPRECOMP_MUTEX_DIAG") != nullptr;
+    // sceKernelCreateMutex(name, attr, initCount, option).
+    rt.register_hle("ThreadManForUser", 0xB7D098C6u,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            KernelMutex m{};
+            m.name = ctx.gpr[4] != 0u ? rt.memory().read_c_string(ctx.gpr[4], 32u) : "mutex";
+            m.attr = ctx.gpr[5];
+            const auto init = static_cast<std::int32_t>(ctx.gpr[6]);
+            if (init > 0) {
+                m.owner = thread_table.current_uid;
+                m.count = static_cast<std::uint32_t>(init);
+            }
+            const std::uint32_t uid = next_mutex_uid++;
+            if (diag)
+                std::cerr << "[mutex] create \"" << m.name << "\" uid=" << psprecomp::hex32(uid)
+                          << " attr=" << psprecomp::hex32(m.attr) << " init=" << init
+                          << " thread=" << thread_table.current_uid << "\n";
+            kernel_mutexes[uid] = std::move(m);
+            ctx.set_gpr(2, uid);
+        });
+    // sceKernelDeleteMutex: waiters wake with WAIT_DELETE.
+    rt.register_hle("ThreadManForUser", 0xF8170FBEu,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const auto it = kernel_mutexes.find(ctx.gpr[4]);
+            if (it == kernel_mutexes.end()) { ctx.set_gpr(2, kErrorUnknownMutex); return; }
+            for (const std::uint32_t uid : it->second.waiters) {
+                if (auto t = thread_table.threads.find(uid);
+                    t != thread_table.threads.end() && t->second.state == ThreadState::Waiting) {
+                    t->second.waiting_on_mutex = 0u;
+                    t->second.wake_at_us = 0u;
+                    t->second.timeout_ptr = 0u;
+                    t->second.context.gpr[2] = kErrorWaitDelete;
+                    t->second.state = ThreadState::Ready;
+                    thread_table.ready_queue.push_back(uid);
+                }
+            }
+            kernel_mutexes.erase(it);
+            ctx.set_gpr(2, 0u);
+        });
+    // sceKernelLockMutex(uid, count, timeout*).
+    rt.register_hle("ThreadManForUser", 0xB011B11Fu,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            const auto it = kernel_mutexes.find(ctx.gpr[4]);
+            if (it == kernel_mutexes.end()) {
+                if (diag)
+                    std::cerr << "[mutex] lock unknown uid=" << psprecomp::hex32(ctx.gpr[4]) << " thread="
+                              << thread_table.current_uid << " ra=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+                ctx.set_gpr(2, kErrorUnknownMutex);
+                return;
+            }
+            const std::uint32_t count = ctx.gpr[5] != 0u ? ctx.gpr[5] : 1u;
+            const std::uint32_t timeout_ptr = ctx.gpr[6];
+            std::uint32_t error = 0u;
+            if (try_take_mutex(it->second, thread_table.current_uid, count, error)) {
+                if (diag)
+                    std::cerr << "[mutex] lock uid=" << psprecomp::hex32(ctx.gpr[4]) << " thread="
+                              << thread_table.current_uid << " ok ra=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+                ctx.set_gpr(2, 0u);
+                return;
+            }
+            if (error != kErrorMutexLocked) { ctx.set_gpr(2, error); return; }
+            const std::uint32_t timeout_us = timeout_ptr != 0u ? rt.memory().load32(timeout_ptr) : 0u;
+            if (diag)
+                std::cerr << "[mutex] lock uid=" << psprecomp::hex32(ctx.gpr[4]) << " thread="
+                          << thread_table.current_uid << " blocks (owner=" << it->second.owner
+                          << " timeout=" << (timeout_ptr != 0u ? std::to_string(timeout_us) : "inf")
+                          << ")\n";
+            const auto cur = thread_table.threads.find(thread_table.current_uid);
+            if (cur == thread_table.threads.end()) { ctx.set_gpr(2, kErrorMutexLocked); return; }
+            ThreadRecord &rec = cur->second;
+            rec.context = ctx;
+            rec.context.pc = ctx.gpr[31];
+            rec.state = ThreadState::Waiting;
+            rec.waiting_on_mutex = ctx.gpr[4];
+            rec.mutex_lock_count = count;
+            rec.timeout_ptr = timeout_ptr;
+            // Timed wait: the scheduler's deadline path reports WAIT_TIMEOUT.
+            // A zero timeout still yields once (deadline == now).
+            rec.wake_at_us = timeout_ptr != 0u ? virtual_time_us + std::max<std::uint32_t>(timeout_us, 1u) : 0u;
+            it->second.waiters.push_back(rec.uid);
+            (void)activate_next_thread(rt, ctx);
+        });
+    // sceKernelTryLockMutex(uid, count).
+    rt.register_hle("ThreadManForUser", 0x0DDCD2C9u,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const auto it = kernel_mutexes.find(ctx.gpr[4]);
+            if (it == kernel_mutexes.end()) { ctx.set_gpr(2, kErrorUnknownMutex); return; }
+            std::uint32_t error = 0u;
+            const std::uint32_t count = ctx.gpr[5] != 0u ? ctx.gpr[5] : 1u;
+            ctx.set_gpr(2, try_take_mutex(it->second, thread_table.current_uid, count, error) ? 0u : error);
+        });
+    // sceKernelUnlockMutex(uid, count).
+    rt.register_hle("ThreadManForUser", 0x6B30100Fu,
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const auto it = kernel_mutexes.find(ctx.gpr[4]);
+            if (it == kernel_mutexes.end()) { ctx.set_gpr(2, kErrorUnknownMutex); return; }
+            KernelMutex &m = it->second;
+            const std::uint32_t count = ctx.gpr[5] != 0u ? ctx.gpr[5] : 1u;
+            if (m.owner != thread_table.current_uid || m.count < count) {
+                ctx.set_gpr(2, kErrorMutexUnlockUnderflow);
+                return;
+            }
+            m.count -= count;
+            if (diag)
+                std::cerr << "[mutex] unlock uid=" << psprecomp::hex32(ctx.gpr[4]) << " thread="
+                          << thread_table.current_uid << " ra=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+            if (m.count == 0u) {
+                hand_off_mutex(m);
+                if (diag && m.owner != 0u)
+                    std::cerr << "[mutex] unlock uid=" << psprecomp::hex32(ctx.gpr[4])
+                              << " hands off to thread " << m.owner << "\n";
+            }
+            // No preemption: the woken waiter runs at the next blocking point.
+            ctx.set_gpr(2, 0u);
+        });
+}
+
 void register_threadman_hle(psprecomp::Runtime &rt) {
     // sceKernelGetThreadId.
     rt.register_hle("ThreadManForUser", 0x293B45B8u,
@@ -1251,11 +1448,11 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     rt.register_hle("ThreadManForUser", 0xE81CAF8Fu, return_uid);  // sceKernelCreateCallback
     rt.register_hle("ThreadManForUser", 0x55C20A00u, return_uid);  // sceKernelCreateEventFlag
     for (const std::uint32_t nid : {0xEDBA5844u, 0x1FB15A32u, 0xEF9E4C70u, 0x402FCF22u,
-                                    0xF8170FBEu, 0x0DDCD2C9u, 0x6B30100Fu,
-                                    0x9FA03CD3u, 0xB011B11Fu, 0xB7D098C6u}) {
+                                    0x9FA03CD3u}) {
         rt.register_hle("ThreadManForUser", nid,
             [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });
     }
+    register_mutex_hle(rt);
 
     // FPL (Fixed Pool Library) — Fase B.2. Blocks are 64-byte aligned and carved
     // out of the same upward arena as SysMem (0x09000000+). TryAllocateFpl MUST
