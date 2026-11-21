@@ -1433,6 +1433,7 @@ constexpr std::uint32_t kFakeMovieMethod = 0x09E00200u;   // native method addr.
 
 void fake_movie_method(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
     ctx.set_gpr(2, 0u);  // "complete" / no-op.
+    ctx.pc = ctx.gpr[31];  // host overrides must return explicitly.
 }
 
 void register_movie_skip(psprecomp::Runtime &rt) {
@@ -1447,6 +1448,7 @@ void register_movie_skip(psprecomp::Runtime &rt) {
     rt.register_function(0x08943694u,
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
             ctx.set_gpr(2, kFakeMovieObject);
+            ctx.pc = ctx.gpr[31];
         },
         "movie_manager_skip");
 
@@ -1471,6 +1473,7 @@ void register_menu_bg_skip(psprecomp::Runtime &rt) {
     rt.register_function(0x08943060u,
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
             ctx.set_gpr(2, 0u);  // skip the background-layer update entirely.
+            ctx.pc = ctx.gpr[31];
         },
         "menu_bg_skip");
 
