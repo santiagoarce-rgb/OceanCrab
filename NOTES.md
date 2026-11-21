@@ -548,7 +548,7 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Sesión jugada por el usuario (nivel 1) grabada con `PSPRECOMP_PLAYER_RECORD`
   y cruzada con `tools/symbolize/player_record.py`: salto (vy +5.07, doble +4.46,
   gravedad ~0.25/frame), estado de movimiento `controller+0x08` (0 quieto, 1
-  camina, 3 aire, 7 triángulo, 9 ataque, 18 círculo), acción `controller+0xD0`,
+  camina, 3 aire, 7 espátula (△), 9 spin slap (□), 18 globo de agua (○)), acción `controller+0xD0`,
   flags `controller+0x64` (0x40 suelo, 0x10 moviéndose, 0x04 doble salto usado),
   combo `controller+0x6C` (1..3) y velocidad máxima `controller+0xA4` (4.40 →
   2.60 atacando).
@@ -556,8 +556,8 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Salud: `controller+0x80` = 4 → 3 en el único golpe recibido (probablemente los
   calzoncillos del HUD). Al entrar al nivel el objeto se reinicializa en la misma
   dirección (no es una muerte).
-- Pendiente: confirmar salud con más golpes / una vida perdida, nombrar estados
-  7/18 (triángulo/círculo), vidas, enemigos (`CStdEnemyEnt`) y la cámara.
+- Pendiente: confirmar salud con más golpes / una vida perdida,
+  vidas, enemigos (`CStdEnemyEnt`) y la cámara.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.

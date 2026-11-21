@@ -49,11 +49,11 @@ inline constexpr std::uint32_t kEffects = 0x8ECu;          // embedded CEffectHa
 // (PSPRECOMP_PLAYER_RECORD + tools/symbolize/player_record.py).
 namespace controller {
 inline constexpr std::uint32_t kMoveState = 0x008u;        // u32, MoveState below    (confirmed)
-inline constexpr std::uint32_t kInputLatch = 0x048u;       // u32, buffered press (3 = attack) (likely)
+inline constexpr std::uint32_t kInputLatch = 0x048u;       // u32, buffered press (3 = spin slap) (likely)
 inline constexpr std::uint32_t kFlags = 0x064u;            // u32, Flag* below        (likely)
-inline constexpr std::uint32_t kCombo = 0x06Cu;            // u32 attack combo step 1..3 (confirmed)
+inline constexpr std::uint32_t kCombo = 0x06Cu;            // u32 spin-slap chain step 1..3 (confirmed)
 inline constexpr std::uint32_t kHealth = 0x080u;           // u32 4 = full; 4->3 on one hit (likely: HUD underwear)
-inline constexpr std::uint32_t kMaxSpeed = 0x0A4u;         // float 4.40, 2.60 while attacking (confirmed)
+inline constexpr std::uint32_t kMaxSpeed = 0x0A4u;         // float 4.40, 2.60 during a spin slap (confirmed)
 inline constexpr std::uint32_t kAction = 0x0D0u;           // u32, action id below    (likely)
 inline constexpr std::uint32_t kWantedVelocity = 0x088u;   // float x,y,z            (likely)
 inline constexpr std::uint32_t kStickMagnitude = 0x094u;   // float 0..1             (confirmed)
@@ -64,13 +64,13 @@ enum MoveState : std::uint32_t {
     kIdle = 0u,
     kWalk = 1u,
     kAirborne = 3u,     // jump / double jump / falling
-    kTriangle = 7u,     // triangle-button action (name pending)
-    kAttack = 9u,       // square: karate combo
+    kSpatula = 7u,      // triangle: spatula attack
+    kSpinSlap = 9u,     // square: spin slap (chains up to 3, see kCombo)
     kState0C = 12u,     // unknown
-    kCircle = 18u,      // circle-button action (name pending)
+    kWaterBalloon = 18u,  // circle: throw a water balloon
 };
 // kAction ids seen: 0 idle, 1 walk, 0x13 jump, 0x17 double jump, 0x11/0x15 airborne,
-// 0x10 landing?, 9 attack, 2/3 triangle, 4 circle, 0xC on ground after an attack.
+// 0x10 landing?, 9 spin slap, 2/3 spatula, 4 water balloon, 0xC on ground after an attack.
 inline constexpr std::uint32_t kFlagDoubleJumpUsed = 0x04u;  // likely
 inline constexpr std::uint32_t kFlagMoving = 0x10u;          // likely
 inline constexpr std::uint32_t kFlagOnGround = 0x40u;        // likely
