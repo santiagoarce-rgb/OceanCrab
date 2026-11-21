@@ -107,6 +107,8 @@ que marcarlos así.
 | `tools/ghidra/` | Script de Ghidra para exportar funciones |
 | `profiles/spongebob/host/` | Perfil: HLE (`spongebob_profile.cpp`), Vulkan GE, SDL, audio SAS, `main.cpp` |
 | `profiles/spongebob/analysis/` | Reportes de funciones/seeds/imports del EBOOT |
+| `profiles/spongebob/analysis/symbols/` | **Fase 2**: símbolos automáticos (clases RTTI, vtables, Lua, ctors). Regenerar con `tools/symbolize/run.sh` |
+| `tools/symbolize/`, `tools/dump_image.cpp` | Pipeline de simbolización; `tools/ghidra/ImportSymbols.java` los carga en Ghidra |
 | `profiles/spongebob/generated/` | Corpus AOT (ignorado por git) |
 | `tests/test_main.cpp` | Tests del framework (`psprecomp_tests`, vía ctest) |
 | `profiles/vcs/` | Perfil heredado de VCS (ignorado; no es parte de OceanCrab) |

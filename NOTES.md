@@ -497,6 +497,31 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Se eliminó `PSPRECOMP_SKIP_BIK` (header Bink falso, objeto Movie falso en
   `sub_08943694`, `sub_08943060` → 0). `[0x08B61000, 0x08B70000)` queda libre.
 
+## Sesión 2026-11-21 (6) — 🧭 fase 2: simbolización automática
+
+- `tools/dump_image` vuelca la imagen reubicada; `tools/symbolize/symbolize.py`
+  la analiza sin Ghidra. Primer resultado: **399 clases** (RTTI de GCC), 255 con
+  padre, 399 vtables, **3 120 funciones nombradas** de 13 876.
+- Fuentes: RTTI (`type_info`, `__si`/`__vmi`), vtables (`{0, &ti, vfuncs}`),
+  ctors/dtors (guardan `&vtable`), mensajes `Clase::Método`, tablas `luaL_reg` y
+  propagación de nombres por slot de vtable.
+- Ojo: muchos mensajes empiezan con `\n`; los mensajes se copian y pegan
+  (`AddStrike` dice ser `CCharType::AddAttack`), así que la tabla de Lua manda.
+- Coincide con lo ya sabido: `0x0890A6FC` = `CPSPSystem::InitializeHeap`,
+  `0x089A7690` = `CWGraphics3D::LoadMesh`, `0x089C9E34` = printf de debug.
+- **API de Lua de los niveles** (39 tablas): `Ent`, `Char`, `CharType`, `Plat`,
+  `Trig`, `Timer`, `Var`, `Game` (32), `Cam`, `Cheat`, `Sound`, `Laser`, `Wardrobe`,
+  `Dialogue`, `PickUp`… más `math`/`string`/`table`/`debug`: motor con Lua 5.x
+  embebido. Base para mods (fase 3).
+- Jerarquía: `CWEntity` → `CWRenderable` → `CWStatic` → `CSBStatic` → entidades
+  del juego (`CTikiEnt`, `CLaserEnt`, `CBombEnt`…); `CSBWorld` → `CWSceneMesh` →
+  `CWWorld` → `CWScene`; armas `CWPWeaponBase` (11); enemigos
+  `CStdEnemyControl` (11); UI `CLayerBase` (30).
+- Siguiente: nombrar el jugador (`CCharEntBase`/`CCharControlBase`), la cámara
+  (`CWStandardCamera`) y el cargador de niveles (`CWWorld::LoadManifest`
+  `0x088143FC`) en Ghidra con `ImportSymbols.java`, y pasar los nombres al runtime
+  (trazas con nombre).
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.
