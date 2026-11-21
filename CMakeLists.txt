@@ -116,6 +116,9 @@ target_link_libraries(psp_recomp PRIVATE psprecomp_core)
 add_executable(dump_function tools/dump_function.cpp)
 target_link_libraries(dump_function PRIVATE psprecomp_core)
 
+add_executable(dump_image tools/dump_image.cpp)
+target_link_libraries(dump_image PRIVATE psprecomp_core)
+
 function(psprecomp_enable_host_avx target)
     # /arch:AVX appears after the directory-wide /arch:AVX2 option in MSVC's
     # command line and therefore silently downgrades the whole target. AVX2
