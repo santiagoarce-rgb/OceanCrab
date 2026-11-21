@@ -604,6 +604,22 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   segundo `CSpongeBobEnt` con la fábrica `0x08A195A4`), desactivar su colisión y
   diálogo, y luego red (relay estilo Anchor).
 
+## Sesión 2026-11-21 (9) — 🎛️ menú F1 (fase 3)
+
+- Investigación: Dusklight usa RmlUi (vía Aurora); Ship of Harkinian usa Dear
+  ImGui con F1 → elegimos ImGui (MIT). PPSSPP: resolución interna, MSAA,
+  anisotrópico, filtrado/escalado de texturas (xBRZ es GPL-3.0: no usarlo en un
+  proyecto MIT), post-procesado (FXAA, viñeta, scanlines), reemplazo de texturas,
+  "lower resolution for effects".
+- Menú F1 (barra Ocean Crab / Graphics): resolución interna, MSAA, anisotrópico
+  (requieren reiniciar), filtro bilinear, aspecto, escalado entero, pantalla
+  completa, FPS (en vivo). La entrada del juego se bloquea con el menú abierto.
+- Bugs encontrados: el .ini del repo nunca se cargaba (nombre/ruta distintos); la
+  imagen se estiraba siempre ignorando AspectRatio; título de ventana de GTA LCS.
+- El pez con textura rara del hub (reportado antes) es un NPC `CStdEnemyEnt`.
+- Siguiente: arreglar la resolución interna del 3D; filtrado de texturas forzado y
+  post-procesado; luego reemplazo de texturas.
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.

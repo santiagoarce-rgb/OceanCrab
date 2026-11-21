@@ -55,6 +55,8 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_OBJECT_DUMP=<vtable>:<size>:<every>[:dir]` | Every `<every>` presented frames, write `<size>` bytes of each live object whose first word is `<vtable>` to `<dir>/obj_<addr>_<frame>.bin`. Diff dumps to map class fields. |
 | `PSPRECOMP_PLAYER_RECORD=<file>` | Record, every frame, the pad state plus the whole player object (`tools/symbolize/player_record.py` analyses it). |
 | `PSPRECOMP_OBJECT_RECORD=<file>:<vtable>:<size>[:<vtable>:<size>...]` | Same, for every live object of any classes (e.g. the camera). |
+| `PSPRECOMP_MENU_OPEN=1\|graphics` | Start with the F1 menu open (`graphics` also shows the Graphics panel as a window). For headless screenshots. |
+| `PSPRECOMP_WINDOW_SHOT=<file.bmp>` | Save the composed window (game + menu) at the 600th presented frame. |
 | `PSPRECOMP_PUPPET_TEST` | Co-op groundwork: the hub townsfolk nearest to the player copies the player's world transform every frame, 30 frames late and 1.5 units to the side. |
 | `PSPRECOMP_PLAYER_LOG` | Once per second, print the player's position, yaw, velocity and stick magnitude (follows the game-session pointer). |
 | `PSPRECOMP_CHAIN_DEPTH=<n>` | Limit direct chaining between generated units. |

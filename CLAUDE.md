@@ -178,6 +178,11 @@ que marcarlos así.
 - `PSPRECOMP_MUTEX_DIAG` — create/lock/unlock/bloqueos de los mutex del kernel
 - `PSPRECOMP_AUDIO_PREBUFFER_BLOCKS=<n>`, `PSPRECOMP_AUDIO_WAV=<ruta>` (graba la salida a WAV)
 
+**Menú F1** (`host/spongebob_menu.cpp`, Dear ImGui v1.91.9b vía FetchContent, backend SDL_Renderer):
+guarda en `SpongebobNative.ini` junto al ejecutable (`save_spongebob_setting`). Ojo: ese es el
+.ini que el juego lee; `config/SpongeBobNative.ini` del repo NO se carga salvo con `PSPRECOMP_CONFIG`.
+- `PSPRECOMP_MENU_OPEN=1|graphics`, `PSPRECOMP_WINDOW_SHOT=<bmp>` — probar el menú en headless.
+
 **Host (`SPONGEBOB_*`)**: `SPONGEBOB_WINDOW_SCALE`, `SPONGEBOB_VULKAN_VALIDATION`,
 `SPONGEBOB_HUD_DIAG`, `SPONGEBOB_GE_NO_DEFER`.
 

@@ -138,7 +138,9 @@ PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
 |---|---|
 | `PSPRECOMP_AUDIO=1` | Enable audio output |
 
-Display, rendering and timing options live in [`profiles/spongebob/config/SpongeBobNative.ini`](profiles/spongebob/config/SpongeBobNative.ini). Every CMake option and environment variable, including the debugging ones, is documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
+Press **F1** in game to open the enhancements menu (graphics options, saved automatically to `SpongebobNative.ini` next to the executable). **F11** toggles fullscreen.
+
+Display, rendering and timing options live in [`profiles/spongebob/config/SpongeBobNative.ini`](profiles/spongebob/config/SpongeBobNative.ini) (copy it next to the executable as `SpongebobNative.ini`, or point `PSPRECOMP_CONFIG` at it). Every CMake option and environment variable, including the debugging ones, is documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
 
 ## Roadmap
 
@@ -147,7 +149,7 @@ Display, rendering and timing options live in [`profiles/spongebob/config/Sponge
 | Bring-up | ✅ | Boot, scheduler, timers, file I/O, rendering, audio, input, **playable start to finish** |
 | **1 · Correctness** | 🚧 | Done: VFPU translation, native Bink video and audio, real heap sizing, no video workarounds. Left: audit the remaining unlowered VFPU sites and fix the last texture glitches |
 | 2 · Understanding | 🔜 | Name functions and structures (player, actors, camera, level loader) and move them to native C++ overrides |
-| 3 · Enhancements | 🔜 | In-game options menu, widescreen, high-resolution rendering, 60 FPS, controller remapping, mod support |
+| 3 · Enhancements | 🚧 | F1 options menu (started), widescreen, high-resolution rendering, 60 FPS, controller remapping, mod support |
 | 4 · Co-op | 🔭 | Online co-op: sync remote players as in-world puppets, then shared progress |
 | 5 · Platforms | 🔭 | Windows and macOS builds, performance work |
 
