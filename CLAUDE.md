@@ -76,7 +76,7 @@ marcarlos así.
 ## Estado actual (2026-11-20)
 
 - Bota, corre el main loop, renderiza (Vulkan) con audio e input. **New Game llega a
-  gameplay** (hub del Krusty Krab), sin `PSPRECOMP_SKIP_BIK`.
+  gameplay** (hub (la casa de Bob Esponja)), sin `PSPRECOMP_SKIP_BIK`.
 - Heap del motor: `CPSPSystem::InitializeHeap` usa `sceKernelMaxFreeMemSize() - 1 MiB`.
   La memoria libre se calcula de verdad (arena después del módulo, `0x08B70000`,
   hasta los stacks). `[0x08B61000, 0x08B70000)` es scratch del host.

@@ -30,7 +30,7 @@ The long-term goal is a full PC port in the spirit of community projects such as
 ## Status
 
 > [!NOTE]
-> **Gameplay reached.** The game boots, plays its Bink videos natively, and **New Game** loads the first level (the Krusty Krab hub) with the HUD, characters and working input.
+> **Gameplay reached.** The game boots, plays its Bink videos natively, and **New Game** loads the hub (SpongeBob's house) and the first level, with the HUD, characters and working input.
 
 | Area | | Notes |
 |---|:---:|---|

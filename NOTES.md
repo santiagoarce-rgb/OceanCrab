@@ -394,7 +394,7 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   (`e023fe3`): memoria libre real (arena desde `0x08B70000`), reuso de stacks
   de threads borrados y objeto Movie falso movido a scratch. Heap: 19.5 MiB.
   Esto también explica el viejo `operator new` → 0 al crear personajes.
-- Resultado: hub del Krusty Krab con HUD y Patrick; 32k+ frames sin crash.
+- Resultado: hub (la casa de Bob Esponja) con HUD y Patrick; 32k+ frames sin crash.
 - Pistas falsas descartadas: `[io] open/read/getstat` se truncan tras 30 líneas
   (`traced < 30`); `sceIoReadAsync/PollAsync` (stubs) solo los usa el módulo de
   E/S de Bink (`0x089E9xxx`), no el cargador de paquetes.
