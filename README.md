@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/banner.png" alt="Ocean Crab — hand-drawn crab banner: Native PC static recomp. Welcome!">
+<img src="docs/assets/banner.png" alt="Ocean Crab — hand-drawn smiling red crab logo" width="420">
 
 **SpongeBob's Truth or Square** (PSP · `ULUS-10478`), running natively on PC.<br>
 The game's MIPS code is translated to C++ ahead of time and compiled for your CPU. No emulator, no JIT.
