@@ -54,18 +54,41 @@ PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNa
 Los assets se leen de `profiles/spongebob/original/PSP_GAME/USRDIR/`.
 Config de host: `profiles/spongebob/config/SpongeBobNative.ini`.
 
-## Estado actual
+## Fases del proyecto
+
+El roadmap completo está en el `README.md` (sección *Roadmap*). En resumen, son
+tres etapas grandes:
+
+1. **Recompilar bien (Corrección)** — 🚧 *actual*. El juego tiene que correr
+   con código traducido fiel, sin hacks: VFPU completo en el codegen y quitar
+   los workarounds de video/alloc.
+2. **Entender el código** — 🔜. Nombrar funciones y estructuras (player,
+   actores, cámara, cargador de niveles) en Ghidra y pasarlas a overrides
+   nativos en C++ (`register_function`).
+3. **Extras** — 🔜/🔭. Menú de opciones, widescreen, alta resolución, 60 FPS,
+   remapeo, mods y **co-op online** (jugadores remotos como "puppets"), luego
+   Windows/macOS.
+
+Al proponer arreglos: preferir la causa raíz y documentar las estructuras del
+juego. Los hooks de `PSPRECOMP_SKIP_BIK` son **deuda técnica** y hay que
+marcarlos así.
+
+## Estado actual (2026-11-20)
 
 - Bota, corre el main loop, renderiza (Vulkan) con audio e input. **Llega al menú
   principal**; Story Mode, Credits y Options son navegables.
-- **"New Game" truena en el Movie manager**: los videos Bink están enlazados
-  estáticamente en el EBOOT y su decodificador usa **VFPU**, que el codegen aún
-  no traduce. Con `PSPRECOMP_SKIP_BIK=1` hay varios hooks para sortearlo
+- **VFPU**: un escaneo del `.text` con el decoder mostró que `vi2s` (audio de
+  Bink) era la única instrucción VFPU que faltaba en el codegen. Se añadió en
+  `11c2c47` (`vi2uc/vi2c/vi2us/vi2s`). **Falta regenerar el corpus** y probar
+  "New Game" **sin** `PSPRECOMP_SKIP_BIK`.
+- Con `PSPRECOMP_SKIP_BIK=1`, "New Game" pasa del menú gracias a estos hooks
   (`spongebob_profile.cpp`): header Bink falso, `sub_08943694` → objeto Movie
-  falso "completo", `sub_08943060` → 0 (falta `menu_bkg.pvs`).
-- En curso (working tree, sin commit): chequeo de `jr`/`jalr` a destino nulo
-  (`PSPRECOMP_NULL_JUMP_CHECK`) con volcado de registros vía
-  `Runtime::null_indirect_jump`.
+  falso "completo", `sub_08943060` → 0 (falta `menu_bkg.pvs`) y un Memory Stick
+  falso. Los personajes 3D aún no se crean: en la cadena de constructores
+  `0x0894C094 → 0x0894E4E4 → 0x08956928` llega `this = null` porque
+  `operator new` (`0x089C4998`) devuelve 0.
+- `PSPRECOMP_NULL_JUMP_CHECK` (commit `cf37156`) atrapa `jr`/`jalr` a 0 y vuelca
+  los registros.
 
 ## Estructura
 

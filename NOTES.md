@@ -297,3 +297,55 @@ devuelven 0.
 ### Verificación visual (para el usuario)
 Correr LIVE (sin SDL_VIDEODRIVER=dummy) y presionar un botón → el juego debería
 salir de la pantalla "press any button" y continuar.
+
+## Sesiones 2026-10-26/27 — menú principal y workarounds de Bink (resumen)
+
+Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento.
+
+- `190f8d3`: se corrigió el mapeo de `game_root`, se añadió `sceIoLseek` y los
+  `.bik` se saltan en modo headless → **llega al menú principal**.
+- Bink (videos enlazados estáticamente en el EBOOT): pruebas sucesivas con un
+  header falso (`db7bb46`, `5413cdb`, `b6ee145`: tamaño 44, frames 1 → 0). La
+  solución estable fue `faef3e8`: hook a `sub_08943694` (accessor del Movie
+  manager) que devuelve un objeto Movie falso en RAM guest, con una vtable que
+  reporta "completo". Va condicionado a `PSPRECOMP_SKIP_BIK`.
+- `63f7718`: Memory Stick falso; el diálogo de savedata termina al instante.
+- `9f22e2d`: `sub_08943060` → 0. El fondo animado del menú lee la lista
+  `obj+0x180`, que se llena desde `menu_bkg.pvs`, y ese archivo no existe suelto
+  (las mallas están dentro de `mm.pkg`).
+- Después de "New Game", los personajes 3D no se crean: en la cadena de
+  constructores `0x0894C094 → 0x0894E4E4 → 0x08956928` llega `this = null`
+  porque `operator new` (`0x089C4998`) devuelve 0. Pendiente: rastrear el heap.
+
+## Sesión 2026-11-20 — docs, CI, null-jump check y VFPU vi2x
+
+### Proyecto / docs
+- Se reescribió el README (banner, estado, pasos de build, **roadmap**) y se
+  añadieron `CLAUDE.md`, `CONTRIBUTING.md`, `THIRD_PARTY.md` y
+  `docs/ENVIRONMENT.md`. CI con GCC y Clang en un contenedor Arch.
+- **Fases del proyecto** (ver README → Roadmap): (1) recompilar bien
+  (corrección: VFPU y quitar hacks), (2) entender el código (simbolizar
+  estructuras y pasarlas a overrides nativos), (3) extras (mejoras, mods,
+  co-op online, otras plataformas).
+
+### Depuración
+- `cf37156`: `PSPRECOMP_NULL_JUMP_CHECK` atrapa `jalr` y `jr $reg≠ra` a 0 y llama
+  a `Runtime::null_indirect_jump`, que vuelca los GPR. `jr $ra` queda exento
+  porque las entradas de thread regresan legítimamente a `ra=0`. ON por defecto
+  en Debug.
+
+### VFPU
+- Un escaneo del `.text` con el decoder encontró que **`vi2s` era la única
+  instrucción VFPU que el codegen no manejaba**: 64 sitios en
+  `0x089D5DE8–0x089D6D68`, el camino de audio de Bink de float a PCM s16
+  (`vscl → vf2iz → vi2s.q → sv.q`).
+- `11c2c47`: `OpcodeKind::Vi2x` + `execute_vfpu_vi2x` (con prefijos de origen y
+  destino) + codegen + tests.
+- El corpus anterior es del 2026-11-15 (anterior a vi2x). Se regeneró y
+  recompiló en esta sesión.
+
+### Próximo paso
+1. Probar "New Game" **sin** `PSPRECOMP_SKIP_BIK` para ver si Bink decodifica de
+   verdad.
+2. Si funciona, retirar uno por uno los hooks falsos de Movie/Bink.
+3. Rastrear el `operator new` que devuelve 0 en la creación de personajes.
