@@ -62,6 +62,7 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | Variable | Effect |
 |---|---|
 | `PSPRECOMP_DUMP_FRAME=<dir>` | Write selected presented frames to `<dir>/frame_N.ppm`. |
+| `PSPRECOMP_DUMP_FRAME_AT=<n,n,...>` | Frame numbers to dump (default `1,40,80,120,160,190,400,800,1200,1600`). |
 | `PSPRECOMP_GE_BACKEND` | Renderer backend (normally taken from the `.ini`). |
 | `PSPRECOMP_INTERNAL_WIDTH`, `PSPRECOMP_INTERNAL_HEIGHT` | Internal render resolution (normally taken from the `.ini`). |
 | `PSPRECOMP_GE_STRICT` | Treat unknown GE commands as errors. |

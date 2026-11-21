@@ -349,3 +349,30 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
    verdad.
 2. Si funciona, retirar uno por uno los hooks falsos de Movie/Bink.
 3. Rastrear el `operator new` que devuelve 0 en la creación de personajes.
+
+## Sesión 2026-11-20 (2) — Bink corre nativo; bugs del scheduler
+
+- El corpus ya incluía `vi2x` (`rewritten units: 0`); se recompiló igual.
+- **Sin `PSPRECOMP_SKIP_BIK`**, el main thread (uid 2) saltaba a 0 en el IDCT
+  de Bink (`0x089E58C8`) y el runtime lo daba por terminado. Causa:
+  `yield_current_thread` (que solo usa el spin-yield) guardaba
+  `pc = $ra`, como si viniera de una HLE, cuando en realidad estaba en un
+  boundary arbitrario. Eso forzaba un retorno prematuro. Fix: retomar en
+  `ctx.pc` (`a48f903`).
+- Ese bug era el que "hacía funcionar" los hooks de SKIP_BIK: no ponían
+  `ctx.pc = ra` y se ejecutaban en loop hasta que el spin-yield los sacaba.
+  Fix: retorno explícito (`6d1b87d`). **Regla: todo `register_function` debe
+  setear `ctx.pc`.**
+- Segundo cuelgue: `sceKernelExitDeleteThread` no despertaba a quien estaba en
+  `sceKernelWaitThreadEnd`. Bink crea un helper por video (entrada `0x089CCAE4`)
+  y el main lo espera. Fix en `a5e200b` (además, el waiter recibe el exit status
+  en v0).
+- Resultado: nick.bik → thq.bik → blt.bik → title screen "Press Start", sin
+  hooks. Con SKIP_BIK también llega al title.
+- **Abierto:** los videos se ven solo en luminancia y en un canal (verde en
+  nick, rojo en Barking Lizards). Sospechas: la conversión YUV→RGB (¿VFPU mal
+  bajado?) o el formato de textura/CLUT con el que el juego sube el frame al GE.
+- **Abierto:** ~1 950 sitios `vfpu0/vfpu3/vfpu/cop2 not lowered` en el corpus,
+  más ~6 900 `unknown`; probablemente sean datos decodificados como código.
+  Auditarlos.
+- Nuevo: `PSPRECOMP_DUMP_FRAME_AT=<n,n,...>` (`d579f2a`).

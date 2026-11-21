@@ -77,10 +77,13 @@ marcarlos así.
 
 - Bota, corre el main loop, renderiza (Vulkan) con audio e input. **Llega al menú
   principal**; Story Mode, Credits y Options son navegables.
-- **VFPU**: un escaneo del `.text` con el decoder mostró que `vi2s` (audio de
-  Bink) era la única instrucción VFPU que faltaba en el codegen. Se añadió en
-  `11c2c47` (`vi2uc/vi2c/vi2us/vi2s`). **Falta regenerar el corpus** y probar
-  "New Game" **sin** `PSPRECOMP_SKIP_BIK`.
+- **Bink corre nativo sin `PSPRECOMP_SKIP_BIK`**: las intros (nick, thq, blt) se
+  reproducen y el juego llega al title screen. **Bug abierto: colores** (solo la
+  luminancia, en un canal). Hay que revisar YUV→RGB o el formato de textura en el GE.
+  Aún quedan ~1 950 sitios `vfpu*/cop2 not lowered` en el corpus; no se ejecutan
+  en las intros, pero hay que auditarlos (¿código real o datos?).
+- Los hooks de `register_function` **deben** poner `ctx.pc = ctx.gpr[31]` al
+  regresar; si no, el dispatcher los vuelve a llamar en loop.
 - Con `PSPRECOMP_SKIP_BIK=1`, "New Game" pasa del menú gracias a estos hooks
   (`spongebob_profile.cpp`): header Bink falso, `sub_08943694` → objeto Movie
   falso "completo", `sub_08943060` → 0 (falta `menu_bkg.pvs`) y un Memory Stick
@@ -141,7 +144,8 @@ marcarlos así.
 - `PSPRECOMP_REALTIME_SPEED_DIAG`, `PSPRECOMP_REALTIME_SPEED_INTERVAL`
 
 **Video / GE**
-- `PSPRECOMP_DUMP_FRAME=<dir>` — vuelca frames presentados a `<dir>/frame_N.ppm`.
+- `PSPRECOMP_DUMP_FRAME=<dir>` — vuelca frames presentados a `<dir>/frame_N.ppm`;
+  `PSPRECOMP_DUMP_FRAME_AT=<n,n,...>` elige cuáles.
 - `PSPRECOMP_GE_BACKEND`, `PSPRECOMP_INTERNAL_WIDTH`, `PSPRECOMP_INTERNAL_HEIGHT` (normalmente vienen del `.ini`)
 - `PSPRECOMP_GE_STRICT`, `PSPRECOMP_GE_PHASE_DIAG`, `PSPRECOMP_GE_DIRECT_NONINDEXED_DRAW`
 - `PSPRECOMP_GE_PARALLEL_VERTEX_DECODE`, `PSPRECOMP_GE_PARALLEL_VERTEX_THRESHOLD`, `PSPRECOMP_GE_PARALLEL_VERTEX_MAX_WORKERS`, `PSPRECOMP_GE_PARALLEL_TEXTURE_DECODE`

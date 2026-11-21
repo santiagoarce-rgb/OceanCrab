@@ -42,17 +42,17 @@ The long-term goal is a full PC port in the spirit of community projects such as
 | File I/O | ✅ | `sceIo*` streaming from your extracted `PSP_GAME/USRDIR` |
 | Menus | ✅ | Main menu, Story Mode, Credits, Options |
 | Gameplay | 🚧 | **New Game** gets past the menu with workarounds; 3D characters are not created yet |
-| VFPU | ⏳ | Vector FPU instructions are not translated by the code generator yet |
-| Bink videos | ⏭️ | Skipped with `PSPRECOMP_SKIP_BIK=1` (the decoder needs VFPU) |
+| VFPU | 🚧 | Translated by the code generator; the instructions the Bink decoder uses all run. Remaining unlowered sites are being audited |
+| Bink videos | 🚧 | Intro videos decode and play through to the title screen; colors are wrong (luma only) |
 
 ### Current investigation
 
 Two things block gameplay. They are probably related:
 
-- **VFPU coverage.** The statically linked Bink decoder, and very likely the 3D engine, use PSP VFPU instructions that the code generator does not emit yet. This is the main Phase 1 task.
+- **Bink colors.** The statically linked Bink decoder now runs natively and the intro videos play, but frames show only luminance in a single channel. The YUV → RGB path (or the video texture format in the GE) is under investigation.
 - **Allocation failure in character setup.** A constructor chain (`0x0894C094 → 0x0894E4E4 → 0x08956928`) receives `this = null` because `operator new` (`0x089C4998`) returns 0. The failing heap path is being traced.
 
-Until VFPU support lands, `PSPRECOMP_SKIP_BIK=1` replaces the video pipeline with stubs (a fake Bink header and a "finished" Movie object) so the game can move on.
+`PSPRECOMP_SKIP_BIK=1` still replaces the video pipeline with stubs (a fake Bink header and a "finished" Movie object). It is no longer needed to reach the title screen, and the plan is to remove it.
 
 ## How it works
 
@@ -141,7 +141,7 @@ PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNa
 
 | Variable | Purpose |
 |---|---|
-| `PSPRECOMP_SKIP_BIK=1` | Skip the Bink videos (required until VFPU is supported) |
+| `PSPRECOMP_SKIP_BIK=1` | Skip the Bink videos with stub objects (workaround, being phased out) |
 | `PSPRECOMP_AUDIO=1` | Enable audio output |
 
 Display, rendering and timing options live in [`profiles/spongebob/config/SpongeBobNative.ini`](profiles/spongebob/config/SpongeBobNative.ini). Every CMake option and environment variable, including the debugging ones, is documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).
