@@ -1,0 +1,11 @@
+functions in corpus: 13876
+classes (RTTI): 399
+classes with parent: 255
+vtables: 399
+named functions: 3120
+  virtual: 2192
+  ctor: 389
+  lua-binding: 291
+  import: 176
+  debug-string: 50
+  virtual-named: 22
