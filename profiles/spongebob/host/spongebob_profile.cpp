@@ -131,6 +131,9 @@ std::uint64_t ge_enqueue_count{};
 std::uint64_t ge_list_sync_count{};
 std::uint64_t ge_draw_sync_count{};
 std::uint64_t frame_present_count{};
+// Last pad state handed to the game (for PSPRECOMP_PLAYER_RECORD).
+std::uint32_t last_pad_buttons{};
+std::uint8_t last_pad_lx{128u}, last_pad_ly{128u};
 std::uint64_t vblank_wait_count{};
 std::uint32_t last_frame_buffer{0u};
 bool has_last_frame_buffer{false};
@@ -504,6 +507,9 @@ void register_other_stubs(psprecomp::Runtime &rt) {
             rt.memory().store8(sample + 11u, 128u);           // ry
             rt.memory().zero(sample + 12u, 4u);               // Rsrv
         }
+        last_pad_buttons = buttons;
+        last_pad_lx = analog_x;
+        last_pad_ly = analog_y;
         ctx.set_gpr(2, count);
     };
     rt.register_hle("sceCtrl", 0x3A622550u,  // sceCtrlPeekBufferPositive
@@ -1707,6 +1713,36 @@ void player_log_tick(psprecomp::Runtime &rt) {
     std::cerr << line << "\n";
 }
 
+// PSPRECOMP_PLAYER_RECORD=<file>: append one record per presented frame while a
+// player exists: "SBR1" header once, then {u32 frame, u32 buttons, u8 lx, u8 ly,
+// u16 0, u32 entity, u8 object[0x928]}. tools/symbolize/player_record.py
+// correlates button presses with the fields that change after them.
+void player_record_tick(psprecomp::Runtime &rt) {
+    static std::FILE *file = [] {
+        const char *path = std::getenv("PSPRECOMP_PLAYER_RECORD");
+        std::FILE *f = path != nullptr ? std::fopen(path, "wb") : nullptr;
+        if (f != nullptr) {
+            std::fwrite("SBR1", 1u, 4u, f);
+            std::cerr << "[player-record] writing " << path << "\n";
+        }
+        return f;
+    }();
+    static std::uint64_t last_frame = ~std::uint64_t{0};
+    if (file == nullptr || frame_present_count == last_frame) return;
+    last_frame = frame_present_count;
+    namespace g = spongebob::game;
+    const std::uint32_t entity = g::find_player(rt.memory());
+    if (entity == 0u) return;
+    const std::uint8_t *object = rt.memory().raw_pointer(entity, g::kSpongeBobEntSize);
+    if (object == nullptr) return;
+    const std::uint32_t header[4] = {
+        static_cast<std::uint32_t>(frame_present_count), last_pad_buttons,
+        static_cast<std::uint32_t>(last_pad_lx) | (static_cast<std::uint32_t>(last_pad_ly) << 8u), entity};
+    std::fwrite(header, sizeof header, 1u, file);
+    std::fwrite(object, 1u, g::kSpongeBobEntSize, file);
+    if ((frame_present_count % 60u) == 0u) std::fflush(file);  // Ctrl+C loses at most ~1 s
+}
+
 void object_dump_tick(psprecomp::Runtime &rt) {
     static const struct Config {
         std::uint32_t vtable{}, size{}, every{};
@@ -1748,8 +1784,14 @@ void register_display_hle(psprecomp::Runtime &rt) {
     // sceDisplayWaitVblank* — park the caller until the next virtual VBlank.
     const auto wait_vblank = [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
         ++vblank_wait_count;
+        // Closing the window ends the run cleanly (files flushed, audio closed).
+        if (display_window_closed()) {
+            rt.stop("window closed");
+            return;
+        }
         object_dump_tick(rt);
         player_log_tick(rt);
+        player_record_tick(rt);
         if (vblank_wait_count % 100u == 0u) {
             std::cerr << "[display] wait_vblank count=" << vblank_wait_count
                       << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
