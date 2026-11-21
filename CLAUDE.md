@@ -145,6 +145,7 @@ que marcarlos así.
   Cada línea termina con la función que la imprimió (símbolos de fase 2).
 - `PSPRECOMP_SYMBOLS=<csv>` — mapa de símbolos para crash dumps/trazas (default `analysis/symbols/symbols.csv`; `0` lo apaga).
 - `PSPRECOMP_OBJECT_DUMP=<vtable>:<size>:<every>[:dir]` — vuelca objetos vivos de una clase (mapear campos).
+- `PSPRECOMP_PLAYER_RECORD=<file>` / `PSPRECOMP_OBJECT_RECORD=<file>:<vtable>:<size>[:...]` — graban botones + objetos cada frame mientras el usuario juega; analizar con `tools/symbolize/player_record.py`.
 - `PSPRECOMP_PLAYER_LOG` — posición/yaw/velocidad del jugador cada segundo. Layout en `host/game/spongebob_player.hpp`.
 - `PSPRECOMP_MAX_DISPATCHES` — tope de dispatches (default 4 000 000 000).
 - `PSPRECOMP_SPIN_YIELD_TICKS` — ticks con el mismo PC antes de forzar yield (default 4).

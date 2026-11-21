@@ -554,8 +554,8 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   2.60 atacando).
 - Cerrar la ventana ahora termina el juego limpio (antes `g_closed` no se leía).
 - Salud: `controller+0x80` = 4 → 3 en el único golpe recibido (probablemente los
-  calzoncillos del HUD). Al entrar al nivel el objeto se reinicializa en la misma
-  dirección (no es una muerte).
+  calzoncillos del HUD). Al entrar al nivel el objeto se reinicializó en la misma
+  dirección (no era una muerte); ver abajo: no siempre pasa.
 - 2.ª grabación (2 muertes, 2 vidas ganadas): salud confirmada, 4→3→2→1→0 y
   vuelve a 4 al reaparecer en el checkpoint; golpes cada ~215 frames
   (invulnerabilidad ~3.6 s).
@@ -563,9 +563,15 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   `SetLives(G, [G+4]+n)` (`0x0881CFE0`, tope 99) con `G = [0x08A8248C]`; la función
   vecina `0x0881CFFC` pone `G+8` con tope 999999 (los puntos del HUD). En New Game:
   vidas 3, puntos 0 (`PSPRECOMP_PLAYER_LOG`).
-- Durante los créditos aparece otro `CSpongeBobEnt` (`0x08DF603C`).
-- Pendiente: confirmar vidas/puntos con una grabación que los incluya, enemigos
-  (`CStdEnemyEnt`) y la cámara.
+- La dirección del jugador NO es fija: en la 2.ª grabación (con créditos antes)
+  el hub usó `0x08E81FE8` y el nivel creó uno nuevo en `0x08DF603C`. Buscarlo
+  siempre por la sesión (`find_player`).
+- Cámara de juego = `CCameraStory` (vtable `0x08A741D0`; `CWStandardCamera` vive
+  desde el arranque y es la vista de plataforma). Ojo `+0x08`, objetivo `+0x84` =
+  jugador + 1.3 en y, distancia fija ~3.11; L recentra detrás del jugador. Layout en
+  `host/game/spongebob_camera.hpp` (`PSPRECOMP_OBJECT_RECORD`).
+- Pendiente: grabar cámara con el usuario moviéndola, vidas/puntos en una grabación,
+  enemigos (`CStdEnemyEnt`).
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
