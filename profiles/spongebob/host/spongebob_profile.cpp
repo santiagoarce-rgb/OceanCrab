@@ -753,6 +753,9 @@ struct ThreadTable {
     std::uint32_t current_uid{1u};              // uid 1 == module_start thread.
     std::uint32_t next_uid{2u};
     std::uint32_t next_stack_top{0x0A000000u};  // PSP user RAM top; stacks grow down.
+    // Stacks of deleted threads, reused before carving new ones: Bink creates
+    // two short-lived 32 KiB threads per movie.
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> free_stacks;  // {base, size}
     std::map<std::uint32_t, ThreadRecord> threads;
     std::vector<std::uint32_t> ready_queue;
 };
@@ -767,7 +770,11 @@ struct PartitionBlock {
 
 struct PartitionTable {
     std::uint32_t next_uid{1u};
-    std::uint32_t next_address{0x09000000u};  // below the thread stacks; grows up.
+    // User partition arena: starts just past the loaded module and grows up
+    // toward the thread stacks. ULUS-10478's image (text+data+bss) ends at
+    // 0x08B60DE4; [0x08B61000, 0x08B70000) is reserved for host-owned guest
+    // objects (e.g. the SKIP_BIK fake Movie).
+    std::uint32_t next_address{0x08B70000u};
     std::map<std::uint32_t, PartitionBlock> blocks;
 };
 
@@ -836,8 +843,33 @@ std::uint64_t advance_system_time() {
 std::uint32_t allocate_stack(std::uint32_t size) {
     std::uint32_t aligned = (size + 0xFFu) & ~0xFFu;
     if (aligned < 0x1000u) aligned = 0x1000u;
+    for (auto it = thread_table.free_stacks.begin(); it != thread_table.free_stacks.end(); ++it) {
+        if (it->second == aligned) {
+            const std::uint32_t base = it->first;
+            thread_table.free_stacks.erase(it);
+            return base;
+        }
+    }
+    if (thread_table.next_stack_top - aligned < partition_table.next_address) {
+        std::cerr << "[thread] WARN: stack of " << aligned << " bytes collides with the user arena\n";
+    }
     thread_table.next_stack_top -= aligned;
     return thread_table.next_stack_top;  // stack base (bottom).
+}
+
+void release_stack(std::uint32_t base, std::uint32_t size) {
+    if (size == 0u) return;
+    std::uint32_t aligned = (size + 0xFFu) & ~0xFFu;
+    if (aligned < 0x1000u) aligned = 0x1000u;
+    thread_table.free_stacks.emplace_back(base, aligned);
+}
+
+// Free user memory as the guest sees it: the gap between the partition arena
+// (growing up) and the thread stacks (growing down). The engine sizes its main
+// heap as sceKernelMaxFreeMemSize() - 1 MiB, so a fixed value starves it.
+std::uint32_t user_free_memory() {
+    return thread_table.next_stack_top > partition_table.next_address
+        ? thread_table.next_stack_top - partition_table.next_address : 0u;
 }
 
 // Wake any Waiting thread whose virtual-time deadline has passed.
@@ -999,12 +1031,15 @@ void register_sysmem_hle(psprecomp::Runtime &rt) {
     // sceKernelSetCompilerVersion — no-op.
     rt.register_hle("SysMemUserForUser", 0xF77D77CBu,
         [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 0u); });
-    // sceKernelMaxFreeMemSize.
+    // sceKernelMaxFreeMemSize / sceKernelTotalFreeMemSize: the real gap
+    // between the user arena and the thread stacks (one contiguous block).
     rt.register_hle("SysMemUserForUser", 0xA291F107u,
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 8u * 1024u * 1024u); });
-    // sceKernelTotalFreeMemSize.
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            ctx.set_gpr(2, user_free_memory());
+            std::cerr << "[sysmem] MaxFreeMemSize -> " << psprecomp::hex32(user_free_memory()) << "\n";
+        });
     rt.register_hle("SysMemUserForUser", 0xF919F628u,
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, 8u * 1024u * 1024u); });
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) { ctx.set_gpr(2, user_free_memory()); });
     // sceKernelAllocPartitionMemory — simple upward arena.
     rt.register_hle("SysMemUserForUser", 0x237DBD4Fu,
         [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
@@ -1017,6 +1052,9 @@ void register_sysmem_hle(psprecomp::Runtime &rt) {
             block.size = aligned;
             partition_table.next_address += aligned;
             const std::uint32_t uid = partition_table.next_uid++;
+            std::cerr << "[sysmem] alloc \"" << block.name << "\" size=" << psprecomp::hex32(aligned)
+                      << " -> " << psprecomp::hex32(block.address) << ".." << psprecomp::hex32(block.address + aligned)
+                      << " uid=" << uid << "\n";
             partition_table.blocks[uid] = std::move(block);
             ctx.set_gpr(2, uid);
         });
@@ -1158,6 +1196,7 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
                 it->second.state = ThreadState::Completed;
                 it->second.exit_status = ctx.gpr[4];
                 std::cerr << "[thread] delete uid=" << thread_table.current_uid << "\n";
+                release_stack(it->second.stack_base, it->second.stack_size);
                 thread_table.threads.erase(it);
             }
             // Deleting must not strand threads blocked in sceKernelWaitThreadEnd
@@ -1478,9 +1517,10 @@ void log_main_loop_entries(psprecomp::Runtime &, psprecomp::AllegrexContext &,
 // That object's field0 points to a fake vtable whose vtable[4] method reports
 // "complete" (returns 0). No effect unless PSPRECOMP_SKIP_BIK is set.
 // ---------------------------------------------------------------------------
-constexpr std::uint32_t kFakeMovieObject = 0x09E00000u;   // 256 bytes, zeroed.
-constexpr std::uint32_t kFakeMovieVtable = 0x09E00100u;   // 32 bytes.
-constexpr std::uint32_t kFakeMovieMethod = 0x09E00200u;   // native method addr.
+// Host scratch between the module image and the user arena (see PartitionTable).
+constexpr std::uint32_t kFakeMovieObject = 0x08B68000u;   // 256 bytes, zeroed.
+constexpr std::uint32_t kFakeMovieVtable = 0x08B68100u;   // 32 bytes.
+constexpr std::uint32_t kFakeMovieMethod = 0x08B68200u;   // native method addr.
 
 void fake_movie_method(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
     ctx.set_gpr(2, 0u);  // "complete" / no-op.
