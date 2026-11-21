@@ -582,7 +582,12 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   hub son `CStdEnemyEnt` con `CDummyControl`. Layout en `host/game/spongebob_enemy.hpp`.
 - Ojo: un objeto liberado conserva su vtable; el escaneo por vtable también los
   encuentra (61 "enemigos" en el nivel, 16 se movieron).
-- Pendiente: vidas/puntos en una grabación, otros tipos de enemigo, la IA.
+- Pelea con Squidbot (misma grabación, frames 9840–19298; el jefe `CSquidBoss` no se
+  grabó): la salud también SUBE (1→4, recogiendo objetos); estado 23 = retroceso
+  fuerte (~18 frames, baja salud); estado 22 = ~37 frames quieto en dos puntos
+  simétricos del arena (¿mecánica del jefe?); 3 secuaces `CStdEnemyEnt` (salud 2)
+  que reaparecen en oleadas (frames 13069, 15841).
+- Pendiente: grabar `CSquidBoss`, vidas/puntos en una grabación, otros enemigos, la IA.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.

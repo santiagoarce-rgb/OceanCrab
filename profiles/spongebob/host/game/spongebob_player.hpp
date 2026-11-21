@@ -75,6 +75,8 @@ enum MoveState : std::uint32_t {
     kSpinSlap = 9u,     // square: spin slap (chains up to 3, see kCombo)
     kHurt = 12u,        // knocked back by an enemy strike (seen at the strike frame)
     kHurtAlt = 15u,     // also seen right after an enemy strike (variant, unconfirmed)
+    kBossStand = 22u,   // Squidbot fight: ~37 frames standing still at two mirrored arena spots (unconfirmed)
+    kKnockedBack = 23u, // Squidbot fight: ~18-frame knockback, health drops (likely the boss hit)
     kWaterBalloon = 18u,  // circle: throw a water balloon
 };
 // kAction ids seen: 0 idle, 1 walk, 0x13 jump, 0x17 double jump, 0x11/0x15 airborne,
