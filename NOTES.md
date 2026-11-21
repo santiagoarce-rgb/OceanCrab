@@ -444,3 +444,18 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   los factores (FIX → ONE/ZERO/constante) para los estados no cubiertos. Las 5
   variantes viejas no cambian. Videos y cinemáticas con color correcto; menú y
   hub sin regresiones. Puede afectar al agua y los arcoíris (pendiente de ver).
+
+## Sesión 2026-11-21 (3) — resolución interna (pendiente, fase 3)
+
+- El renderer (heredado de lcs-recomp) soporta `InternalResolutionMode=Scale`
+  + `InternalScale=N` en el .ini. En headless a 3× el dump sale a 1440×816 y el
+  2D (logo del menú) se ve nítido.
+- El usuario lo probó en vivo y **el 3D se sigue viendo en baja resolución**.
+  Investigar en la fase 3 si la geometría 3D realmente se rasteriza al target
+  escalado o si solo se escala la composición final.
+
+## Próxima sesión
+1. **Audio de Bink**: el "Bink audio thread" (entrada `0x089CCAE4`) hace
+   `ExitDeleteThread` con status 0 apenas arranca, en todos los videos.
+2. Después: láseres del museo (líneas que no llegan a Vulkan), borrar hooks de
+   `PSPRECOMP_SKIP_BIK`, y la fase 2 (simbolización con ayuda de `PSPRECOMP_GAME_LOG`).
