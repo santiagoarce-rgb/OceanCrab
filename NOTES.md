@@ -401,3 +401,17 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Abierto: Bink sin canal azul; "Bink audio thread" (entrada `0x089CCAE4`)
   termina al instante → videos sin audio. Overrides con `register_function` no
   atrapan llamadas que caen dentro de la misma unit (goto interno).
+
+## Sesión 2026-11-20 (4) — 🏁 juego completable
+
+- Crash al pegar en el nivel 1: `Unsupported 0x0043002E at 0x0897AA94`. El
+  decoder tenía `msub/msubu` en SPECIAL funct `0x1E/0x1F`, pero en Allegrex van
+  en `0x2E/0x2F` (`0x1E/0x1F` no aparece en el `.text`; `0x2E` aparece 9 veces).
+  Fix en el decoder + tests (`680441d`), corpus regenerado (6 units, ~6 min de build).
+  La msub está en `sub_0897AA30` (llamada por puntero), en un cálculo de índice
+  envuelto (`LO = t1 - v0*v1`).
+- El usuario jugó los 3 primeros niveles, usó el cheat de niveles desbloqueados,
+  pasó el nivel final y llegó a los créditos y la cinemática final. Los minijuegos funcionan.
+- Abierto (por prioridad): láseres de seguridad del museo (nivel 3) sin textura;
+  velocidad del juego acelerada; agua y arcoíris raros; un modelo del nivel 1;
+  Bink sin canal azul ni audio.

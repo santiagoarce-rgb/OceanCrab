@@ -75,8 +75,12 @@ marcarlos así.
 
 ## Estado actual (2026-11-20)
 
-- Bota, corre el main loop, renderiza (Vulkan) con audio e input. **New Game llega a
-  gameplay** (hub (la casa de Bob Esponja)), sin `PSPRECOMP_SKIP_BIK`.
+- **El juego se puede terminar de principio a fin** (verificado por el usuario el
+  2026-11-20: niveles, jefe final, créditos y minijuegos), sin `PSPRECOMP_SKIP_BIK`.
+  Hub = casa de Bob Esponja.
+- Bugs de render abiertos: los láseres de seguridad del museo (nivel 3) salen sin
+  textura (**dificulta avanzar → prioridad**); el agua y los arcoíris se ven raros;
+  falta un modelo de objeto en el nivel 1. El juego corre más rápido que tiempo real.
 - Heap del motor: `CPSPSystem::InitializeHeap` usa `sceKernelMaxFreeMemSize() - 1 MiB`.
   La memoria libre se calcula de verdad (arena después del módulo, `0x08B70000`,
   hasta los stacks). `[0x08B61000, 0x08B70000)` es scratch del host.
