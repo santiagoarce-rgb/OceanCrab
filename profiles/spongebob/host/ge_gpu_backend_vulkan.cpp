@@ -159,6 +159,7 @@ struct VulkanState {
     VkBuffer readback{};
     VkDeviceMemory readback_memory{};
     void *readback_mapped{};
+    bool readback_coherent{true};  // false: invalidate before each CPU read
     Texture white{};
     std::unordered_map<std::uint64_t, VkPipeline> pipelines{};
     std::unordered_map<std::uint64_t, VkSampler> sampler_cache{};
@@ -1344,6 +1345,32 @@ bool run_offscreen_self_test(VulkanState &s, std::string &error) {
     return true;
 }
 
+// The per-frame readback is read by the CPU. Plain HOST_VISIBLE|HOST_COHERENT
+// memory is usually uncached (write-combined), and reading 4.7 MB of it per
+// frame at 3x took ~30 ms. Prefer HOST_CACHED memory (coherent if possible,
+// else invalidate before reading); fall back to the old flags.
+bool create_readback_buffer(VulkanState &s, VkDeviceSize size, std::string &error) {
+    const VkMemoryPropertyFlags visible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+    const VkMemoryPropertyFlags candidates[] = {
+        visible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        visible | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
+        visible | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+    };
+    for (const VkMemoryPropertyFlags flags : candidates) {
+        std::string attempt_error;
+        if (create_buffer(s, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, flags, s.readback, s.readback_memory,
+                          &s.readback_mapped, attempt_error)) {
+            s.readback_coherent = (flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0u;
+            std::cerr << "[vulkan] frame readback memory: "
+                      << ((flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0u ? "cached" : "uncached")
+                      << (s.readback_coherent ? ", coherent" : ", non-coherent") << "\n";
+            return true;
+        }
+        error = attempt_error;
+    }
+    return false;
+}
+
 bool create_backend(VulkanState &s, std::string &error) {
     const InternalResolutionDimensions dims = resolve_internal_resolution(spongebob_render_configuration().rendering);
     s.target_width = std::max<std::uint32_t>(1u, dims.width);
@@ -1583,8 +1610,7 @@ bool create_backend(VulkanState &s, std::string &error) {
                        host, s.geometry, s.geometry_memory, &s.geometry_mapped, error) ||
         !create_buffer(s, uniform_size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, host,
                        s.uniforms, s.uniform_memory, &s.uniform_mapped, error) ||
-        !create_buffer(s, readback_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, host,
-                       s.readback, s.readback_memory, &s.readback_mapped, error))
+        !create_readback_buffer(s, readback_size, error))
         return false;
     s.report.transfer_buffer_created = true;
     s.report.transfer_memory_mapped = true;
@@ -1713,6 +1739,33 @@ void ge_gpu_backend_record_draw(const GeGpuDrawDescriptor &draw) noexcept {
     ++s.report.draw_calls;
     s.report.vertices += draw.vertex_count;
     if (draw.texture_enabled) ++s.report.textured_draw_calls;
+    // PSPRECOMP_GE_TEXTURE_LOG: a texture that points INSIDE a render target but
+    // not at its start is sampled from guest VRAM (480x272), not from the scaled
+    // GPU target. Report each such case once (render-to-texture with an offset).
+    static const bool feedback_log = std::getenv("PSPRECOMP_GE_TEXTURE_LOG") != nullptr;
+    if (feedback_log && draw.texture_enabled && (draw.texture_address & 0x0F000000u) == 0x04000000u) {
+        const std::uint32_t tex = draw.texture_address & 0x001FFFF0u;
+        if (find_target(s, tex) == nullptr) {
+            for (const auto &[address, t] : s.targets) {
+                if (tex > address && tex < address + 512u * 512u * 4u) {
+                    static std::unordered_map<std::uint64_t, bool> seen;
+                    const std::uint64_t key = (static_cast<std::uint64_t>(tex) << 32u) | address;
+                    if (seen.emplace(key, true).second)
+                        std::cerr << "[ge-texture] INSIDE TARGET tex=0x" << std::hex << tex << " target=0x" << address
+                                  << " offset=0x" << (tex - address) << std::dec << " fmt=" << draw.texture_format
+                                  << " size=" << draw.texture_width << "x" << draw.texture_height
+                                  << " bufw=" << draw.texture_buffer_width << " through=" << draw.through << "\n";
+                    break;
+                }
+            }
+        } else {
+            static std::unordered_map<std::uint32_t, bool> seen_exact;
+            if (seen_exact.emplace(tex, true).second)
+                std::cerr << "[ge-texture] TARGET AS TEXTURE tex=0x" << std::hex << tex << std::dec
+                          << " fmt=" << draw.texture_format << " size=" << draw.texture_width << "x"
+                          << draw.texture_height << " through=" << draw.through << "\n";
+        }
+    }
     const std::uint32_t target = draw.framebuffer_address & 0x001FFFF0u;
     if (draw.framebuffer_stride != 0u || target == s.display_framebuffer) {
         std::string error;
@@ -2268,6 +2321,13 @@ bool ge_gpu_backend_finish_color_frame(std::uint64_t vblank) noexcept {
             vkQueueWaitIdle(s.queue) == VK_SUCCESS && display_ready && s.readback_mapped != nullptr) {
             const std::size_t row = static_cast<std::size_t>(s.target_width) * 4u;
             s.frame_rgba.resize(row * s.target_height);
+            if (!s.readback_coherent) {
+                VkMappedMemoryRange range{};
+                range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+                range.memory = s.readback_memory;
+                range.size = VK_WHOLE_SIZE;
+                vkInvalidateMappedMemoryRanges(s.device, 1u, &range);
+            }
             std::memcpy(s.frame_rgba.data(), s.readback_mapped, s.frame_rgba.size());
             readback = true;
         }
