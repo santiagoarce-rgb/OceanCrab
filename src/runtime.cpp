@@ -1,4 +1,5 @@
 #include "psprecomp/runtime.hpp"
+#include "psprecomp/symbolizer.hpp"
 #include "psprecomp/common.hpp"
 
 #include <algorithm>
@@ -580,7 +581,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
             const std::int32_t dispatch_thread_uid = g_runtime_thread_uid;
             RecompiledFunction function = lookup_function(before);
             if (function == nullptr) {
-                stop("No recompiled function registered at " + hex32(before));
+                stop("No recompiled function registered at " + describe_address(before) + " (ra=" + describe_address(cpu_.gpr[31]) + ")");
                 return;
             }
             g_runtime_dispatch_pc = before;
@@ -594,10 +595,10 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
                 const std::string name = function_entry != nullptr ? function_entry->name : "unknown";
                 std::ostringstream message;
                 message << e.what() << " while executing " << name
-                        << " dispatch=" << hex32(before) << " guest_pc=" << hex32(cpu_.pc)
+                        << " dispatch=" << describe_address(before) << " guest_pc=" << describe_address(cpu_.pc)
                         << " (a0=" << hex32(cpu_.gpr[4]) << ", a1=" << hex32(cpu_.gpr[5])
                         << ", a2=" << hex32(cpu_.gpr[6]) << ", a3=" << hex32(cpu_.gpr[7])
-                        << ", sp=" << hex32(cpu_.gpr[29]) << ", ra=" << hex32(cpu_.gpr[31]) << ")";
+                        << ", sp=" << hex32(cpu_.gpr[29]) << ", ra=" << describe_address(cpu_.gpr[31]) << ")";
                 append_gpr_dump(message, cpu_);
                 throw Error(message.str());
             }
@@ -658,7 +659,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
             if (function == nullptr) function = lookup_function(before);
             if (function == nullptr) {
                 std::ostringstream message;
-                message << "Unknown destination: no recompiled function registered at " << hex32(before);
+                message << "Unknown destination: no recompiled function registered at " << describe_address(before) << " (ra=" << describe_address(cpu_.gpr[31]) << ")";
                 append_gpr_dump(message, cpu_);
                 stop(message.str());
                 break;
@@ -674,10 +675,10 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
                 const std::string name = function_entry != nullptr ? function_entry->name : "unknown";
                 std::ostringstream message;
                 message << e.what() << " while executing " << name
-                        << " dispatch=" << hex32(before) << " guest_pc=" << hex32(cpu_.pc)
+                        << " dispatch=" << describe_address(before) << " guest_pc=" << describe_address(cpu_.pc)
                         << " (a0=" << hex32(cpu_.gpr[4]) << ", a1=" << hex32(cpu_.gpr[5])
                         << ", a2=" << hex32(cpu_.gpr[6]) << ", a3=" << hex32(cpu_.gpr[7])
-                        << ", sp=" << hex32(cpu_.gpr[29]) << ", ra=" << hex32(cpu_.gpr[31]) << ")";
+                        << ", sp=" << hex32(cpu_.gpr[29]) << ", ra=" << describe_address(cpu_.gpr[31]) << ")";
                 append_gpr_dump(message, cpu_);
                 throw Error(message.str());
             }
@@ -719,7 +720,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
         RecompiledFunction function = lookup_function(before);
         const FunctionEntry *function_entry = lookup_entry(before);
         if (function == nullptr) {
-            stop("No recompiled function registered at " + hex32(before));
+            stop("No recompiled function registered at " + describe_address(before) + " (ra=" + describe_address(cpu_.gpr[31]) + ")");
             break;
         }
         g_runtime_dispatch_pc = before;
@@ -974,20 +975,20 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
                     const DispatchSnapshot &snapshot = recent_dispatches[(first + index) % recent_dispatches.size()];
                     std::cerr << "[recent] uid=" << snapshot.thread_uid
                               << " name=" << snapshot.thread_name.data()
-                              << " pc=" << hex32(snapshot.pc)
+                              << " pc=" << describe_address(snapshot.pc)
                               << " a0=" << hex32(snapshot.a0)
                               << " a1=" << hex32(snapshot.a1)
                               << " a2=" << hex32(snapshot.a2)
                               << " a3=" << hex32(snapshot.a3)
                               << " sp=" << hex32(snapshot.sp)
-                              << " ra=" << hex32(snapshot.ra) << "\n";
+                              << " ra=" << describe_address(snapshot.ra) << "\n";
                 }
             }
             std::ostringstream message;
-            message << e.what() << " while executing " << (function_entry != nullptr ? function_entry->name : std::string("unknown")) << " dispatch=" << hex32(before) << " guest_pc=" << hex32(cpu_.pc)
+            message << e.what() << " while executing " << (function_entry != nullptr ? function_entry->name : std::string("unknown")) << " dispatch=" << describe_address(before) << " guest_pc=" << describe_address(cpu_.pc)
                     << " (a0=" << hex32(cpu_.gpr[4]) << ", a1=" << hex32(cpu_.gpr[5])
                     << ", a2=" << hex32(cpu_.gpr[6]) << ", a3=" << hex32(cpu_.gpr[7])
-                    << ", sp=" << hex32(cpu_.gpr[29]) << ", ra=" << hex32(cpu_.gpr[31]) << ")";
+                    << ", sp=" << hex32(cpu_.gpr[29]) << ", ra=" << describe_address(cpu_.gpr[31]) << ")";
             append_gpr_dump(message, cpu_);
             throw Error(message.str());
         }
@@ -1064,13 +1065,13 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
                 const DispatchSnapshot &snapshot = recent_dispatches[(first + index) % recent_dispatches.size()];
                 std::cerr << "[recent] uid=" << snapshot.thread_uid
                           << " name=" << snapshot.thread_name.data()
-                          << " pc=" << hex32(snapshot.pc)
+                          << " pc=" << describe_address(snapshot.pc)
                           << " a0=" << hex32(snapshot.a0)
                           << " a1=" << hex32(snapshot.a1)
                           << " a2=" << hex32(snapshot.a2)
                           << " a3=" << hex32(snapshot.a3)
                           << " sp=" << hex32(snapshot.sp)
-                          << " ra=" << hex32(snapshot.ra) << "\n";
+                          << " ra=" << describe_address(snapshot.ra) << "\n";
             }
         }
         if (profile_dispatch) {
@@ -1107,8 +1108,8 @@ void Runtime::arithmetic_overflow(std::uint32_t pc, std::uint32_t instruction) {
 
 void Runtime::null_indirect_jump(AllegrexContext &ctx, std::uint32_t pc, std::uint32_t source_reg) {
     std::ostringstream message;
-    message << "Indirect jump to null (jr/jalr target 0) at " << hex32(pc)
-            << " source reg $" << source_reg;
+    message << "Indirect jump to null (jr/jalr target 0) at " << describe_address(pc)
+            << " source reg $" << source_reg << " ra=" << describe_address(ctx.gpr[31]);
     append_gpr_dump(message, ctx);
     stop(message.str());
 }
@@ -1204,3 +1205,23 @@ AllegrexContext &Runtime::cpu() noexcept { return cpu_; }
 const AllegrexContext &Runtime::cpu() const noexcept { return cpu_; }
 
 } // namespace psprecomp
+
+namespace psprecomp {
+namespace {
+Symbolizer &symbolizer_instance() {
+    static Symbolizer instance;
+    return instance;
+}
+}  // namespace
+
+void set_symbolizer(Symbolizer symbolizer) { symbolizer_instance() = std::move(symbolizer); }
+
+std::string describe_address(std::uint32_t address) {
+    std::string text = hex32(address);
+    if (const Symbolizer &symbolizer = symbolizer_instance()) {
+        const std::string name = symbolizer(address);
+        if (!name.empty()) text += " <" + name + ">";
+    }
+    return text;
+}
+}  // namespace psprecomp
