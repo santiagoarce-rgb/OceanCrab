@@ -50,6 +50,8 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_REPORT_DISPATCH_COUNT` | Print the total dispatch count at exit. |
 | `PSPRECOMP_PROFILE_DISPATCH`, `..._START`, `..._COUNT` | Profile a window of dispatches. |
 | `PSPRECOMP_HLE_HISTOGRAM` | Print a histogram of HLE calls by NID. |
+| `PSPRECOMP_FRAME_PROFILE` | Every 120 frames, print average ms per frame for game code, GE list translation, Vulkan finish + readback, window present and frame-pacing sleep. Add `PSPRECOMP_GE_PHASE_DIAG` to split the GE time. |
+| `PSPRECOMP_GE_LIST_DIAG` | GE list diagnostics: opcode/page histogram, linking ENDs, FINISH+END positions, control flow of one list. |
 | `PSPRECOMP_MUTEX_DIAG` | Log kernel mutex create/lock/unlock and every blocking lock. |
 | `PSPRECOMP_SYMBOLS=<csv>` | Symbol map used to print names in crash dumps, `PSPRECOMP_TRACE_ON_ERROR` and `PSPRECOMP_GAME_LOG` (default `profiles/spongebob/analysis/symbols/symbols.csv`; `0` disables). |
 | `PSPRECOMP_OBJECT_DUMP=<vtable>:<size>:<every>[:dir]` | Every `<every>` presented frames, write `<size>` bytes of each live object whose first word is `<vtable>` to `<dir>/obj_<addr>_<frame>.bin`. Diff dumps to map class fields. |

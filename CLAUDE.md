@@ -133,7 +133,10 @@ que marcarlos así.
 - `PSPRECOMP_CONFIG` — ruta alternativa al `.ini`.
 - `PSPRECOMP_SIMULATE_BUTTON=<mask>` — OR de botones PSP en cada lectura de pad (pruebas headless).
 - `PSPRECOMP_INPUT_SCRIPT=<first-last=mask[@lx:ly],...>` — botones (y stick izquierdo opcional, 128 = centro) por rango de frames presentados.
-  Llegar a gameplay en headless: `1300-1305=0x8,1500-1505=0x4000,1700-1705=0x4000,1900-1905=0x4000,2100-2105=0x4000`.
+  Llegar a gameplay en headless (saltando las cinemáticas de New Game con X; el hub aparece hacia el frame ~2340 en vez de ~7400):
+  `1300-1305=0x8,1500-1505=0x4000,1700-1705=0x4000,1900-1905=0x4000,2100-2105=0x4000,2300-2305=0x4000,2500-2505=0x4000,2700-2705=0x4000,2900-2905=0x4000,3100-3105=0x4000`.
+- `PSPRECOMP_FRAME_PROFILE` — ms por frame: juego / listas GE / Vulkan+copia / presentar / sueño del pacing (+ comandos GE). Con `PSPRECOMP_GE_PHASE_DIAG` desglosa las listas GE. **Primer recurso para rendimiento** (no hay `perf` instalado).
+- `PSPRECOMP_GE_LIST_DIAG` — histograma de opcodes GE, END que enlazan, FINISH+END y flujo de control de una lista.
 - `PSPRECOMP_NO_FRAME_PACING` — sin límite a tiempo real (**usar en pruebas headless**, van ~1.7× más rápido);
   `PSPRECOMP_PACE_DIAG` — imprime la razón tiempo virtual / reloj real.
 - `PSPRECOMP_GE_UNSUPPORTED_DIAG` — trabajo del GE que el renderer descarta (incluye puntos/líneas que no llegan a Vulkan).

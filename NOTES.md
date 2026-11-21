@@ -620,6 +620,23 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Siguiente: arreglar la resolución interna del 3D; filtrado de texturas forzado y
   post-procesado; luego reemplazo de texturas.
 
+## Sesión 2026-11-21 (10) — ⚡ rendimiento
+
+- `PSPRECOMP_FRAME_PROFILE` (no hay `perf`). Hub a 1×: juego 9.6 ms, listas GE 5.9,
+  Vulkan+copia 6.4, presentar 0.5; va a tiempo.
+- A 3× la copia GPU→CPU costaba 32 ms (20 fps): el buffer de readback era
+  HOST_VISIBLE|COHERENT sin HOST_CACHED (memoria sin caché, lectura lentísima).
+  Con memoria cached: 8 ms, 3× va a tiempo.
+- Error propio durante la medición (ya corregido antes del commit): un
+  `ProfileScope` como cuerpo de un `if` sin llaves sacó `execute_ge_list` del if y
+  re-ejecutaba listas completadas desde después de su END (1.5 M comandos/frame,
+  recorriendo código del juego). Lección: llaves siempre al envolver con scopes.
+- Headless: pulsos de X tras New Game saltan las cinemáticas (hub en ~2340).
+- La resolución interna SÍ escala el 3D (comparado 1× vs 3×); lo de "3D en baja"
+  era que el .ini nunca se cargaba.
+- Siguiente en rendimiento: presentar con swapchain Vulkan (evitar copia + escalado
+  por software), CPU de vértices (~5 ms), y opciones de producción de CMake.
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.
