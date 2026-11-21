@@ -460,6 +460,32 @@ void register_other_stubs(psprecomp::Runtime &rt) {
         std::uint32_t buttons = input.buttons;
         if (const char *sim = std::getenv("PSPRECOMP_SIMULATE_BUTTON"))
             buttons |= static_cast<std::uint32_t>(std::strtoul(sim, nullptr, 0));
+        // PSPRECOMP_INPUT_SCRIPT="first-last=mask,..." holds `mask` pressed during
+        // presented frames [first, last], so menus see press/release edges.
+        struct ScriptedPress { std::uint64_t first, last; std::uint32_t mask; };
+        static const std::vector<ScriptedPress> script = [] {
+            std::vector<ScriptedPress> list;
+            const char *text = std::getenv("PSPRECOMP_INPUT_SCRIPT");
+            for (const char *p = text; p != nullptr && *p != '\0';) {
+                char *end = nullptr;
+                ScriptedPress press{};
+                press.first = std::strtoull(p, &end, 0);
+                if (end == p || *end != '-') break;
+                p = end + 1;
+                press.last = std::strtoull(p, &end, 0);
+                if (end == p || *end != '=') break;
+                p = end + 1;
+                press.mask = static_cast<std::uint32_t>(std::strtoul(p, &end, 0));
+                if (end == p) break;
+                list.push_back(press);
+                p = (*end == ',') ? end + 1 : end;
+            }
+            return list;
+        }();
+        for (const ScriptedPress &press : script) {
+            if (frame_present_count >= press.first && frame_present_count <= press.last)
+                buttons |= press.mask;
+        }
         for (std::uint32_t i = 0u; i < count; ++i) {
             const std::uint32_t sample = destination + i * kSampleSize;
             rt.memory().store32(sample, 0u);              // TimeStamp
