@@ -198,7 +198,10 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
         const std::uint32_t data = op & 0x00FFFFFFu;
 
         ge_state.commands[command] = op;
-        if (command >= 0x2Au && command <= 0x3Fu)
+        // 0x2A-0x41: bone, world, view, projection and texture (0x40 TMS / 0x41
+        // TMD) matrices. Stopping at 0x3F dropped the texture matrix, leaving
+        // it all zeros: uvgen=1 surfaces (water, stomach acid) sampled one texel.
+        if (command >= 0x2Au && command <= 0x41u)
             update_ge_transform_state(ge_state.transform, command, data);
 
         ++executed;
