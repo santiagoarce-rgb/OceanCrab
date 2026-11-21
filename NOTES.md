@@ -651,9 +651,12 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   `PSPRECOMP_PLAYER_LOG` imprime la última perspectiva).
 - `Rendering.DrawDistance` (menú F1, en vivo): recalcula m22/m32 con far × N solo
   para el render. Sin artefactos de profundidad a 8× en el hub.
-- Pendiente: probar en exteriores (nivel 1). Si no aparece nada nuevo, el motor
-  descarta objetos en CPU (frustum por far o PVS) y habrá que tocar el far de
-  `CWCamera` o el PVS.
+- Prueba del usuario (nivel 1, 1× vs 8×): SÍ aparece geometría más lejana (paredes
+  de la cueva que antes dejaban ver el cielo), pero en color de niebla plano: la
+  niebla llega al 100 % justo en el far original. Se escala también la niebla
+  (fin × N, pendiente / N; comandos GE 0xCD/0xCE) en una copia de los comandos.
+- Pendiente: confirmar con la niebla escalada; si faltan objetos lejanos, el motor
+  descarta en CPU (PVS / far de `CWCamera`).
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.

@@ -307,6 +307,29 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
             const bool extend_far = far_scale > 1u && projection[11] != 0.0f && projection[10] != -1.0f &&
                                     projection[10] != 1.0f;
             GeTransformState extended;
+            // Fog hides the original far cut (geometry reaches full fog right at
+            // the old far plane), so stretch it by the same factor:
+            // fog = (z + end) * slope  ->  end * N, slope / N.
+            std::array<std::uint32_t, 256> fog_commands;
+            bool extend_fog = false;
+            if (extend_far && (ge_state.commands[0x1Fu] & 1u) != 0u) {
+                fog_commands = ge_state.commands;
+                const auto f24 = [](std::uint32_t command) {
+                    const std::uint32_t bits = (command & 0x00FFFFFFu) << 8u;
+                    float value;
+                    std::memcpy(&value, &bits, sizeof value);
+                    return value;
+                };
+                const auto to24 = [](std::uint32_t op, float value) {
+                    std::uint32_t bits;
+                    std::memcpy(&bits, &value, sizeof bits);
+                    return (op & 0xFF000000u) | (bits >> 8u);
+                };
+                const float scale = static_cast<float>(far_scale);
+                fog_commands[0xCDu] = to24(fog_commands[0xCDu], f24(fog_commands[0xCDu]) * scale);
+                fog_commands[0xCEu] = to24(fog_commands[0xCEu], f24(fog_commands[0xCEu]) / scale);
+                extend_fog = true;
+            }
             if (extend_far) {
                 extended = ge_state.transform;
                 const float a = projection[10], b = projection[14];
@@ -317,7 +340,8 @@ bool execute_ge_list(psprecomp::Runtime &rt, GeListRecord &list) {
                     extended.projection[14] = -2.0f * new_far * near_plane / (new_far - near_plane);
                 }
             }
-            if (!render_ge_primitive(rt.memory(), ge_state.commands, extend_far ? extended : ge_state.transform,
+            if (!render_ge_primitive(rt.memory(), extend_fog ? fog_commands : ge_state.commands,
+                                     extend_far ? extended : ge_state.transform,
                                      ge_state.vertex_address, ge_state.index_address,
                                      data, stats, error)) {
                 list.state = GeListState::Error;
