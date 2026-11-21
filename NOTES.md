@@ -474,7 +474,28 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   devuelve UNKNOWN_MUTEX, inofensivo por ahora). Los event flags siguen siendo stubs.
 - Ojo en pruebas: `timeout` (SIGTERM) no siempre mata el binario; usar `timeout -s KILL`.
 
+## Sesión 2026-11-21 (5) — 🎨 matriz de textura y alfa del blend
+
+- Reporte del usuario (nivel 9, "24 Hours of Fun at the Krusty Krab"): ácido
+  estomacal y agua de color plano, lámparas con halo sólido; además láseres
+  invisibles (nivel 3) y nubes blancas duras en el menú.
+- `PSPRECOMP_GE_TEXTURE_LOG` + `WHITE FALLBACK` (nuevo) descartaron texturas
+  faltantes: 19 materiales usaban `uvgen=1` (UV × matriz de textura).
+- Bug 1 (`4dac56b`): `execute_ge_list` solo pasaba `0x2A–0x3F` al estado de
+  transformación; TMS/TMD (`0x40/0x41`) se perdían y la matriz quedaba en ceros →
+  UV (0,0) → un solo texel. Arregló agua, lava, ácido, cielos y láseres.
+- Bug 2 (`ffc91aa`): el juego dibuja en framebuffer **5551**; `ge.frag`
+  cuantizaba el alfa a 0/1 (≥0.5) *antes* de salir, y Vulkan usa esa salida como
+  `SRC_ALPHA`. Con blend activo ahora se deja el alfa completo. Arregló nubes
+  (textura `0x041A9A00`, alfa suave de 64 niveles), flores-nube del cielo,
+  sombras, halos de lámparas, luces y un objeto del nivel 1.
+- Herramientas nuevas (`333b053`): `PSPRECOMP_GE_SKIP_TEXTURE` (bisección de
+  texturas comparando `PSPRECOMP_DUMP_FRAME`), `PSPRECOMP_GE_DUMP_TEXTURE` (.pam).
+- Las nubes del menú salen en headless hacia el frame 1000 (escena de la isla,
+  antes de que baje la cámara); el título con casas, hacia el 1250.
+- Abierto: detalles estéticos en algunas texturas de los peces del hub.
+
 ## Próxima sesión
-1. Láseres del museo (líneas que no llegan a Vulkan).
+1. Peces del hub (texturas raras), si vale la pena.
 2. Borrar hooks de `PSPRECOMP_SKIP_BIK` y la fase 2 (simbolización con ayuda de
    `PSPRECOMP_GAME_LOG`).

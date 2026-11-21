@@ -78,9 +78,10 @@ marcarlos así.
 - **El juego se puede terminar de principio a fin** (verificado por el usuario el
   2026-11-20: niveles, jefe final, créditos y minijuegos), sin `PSPRECOMP_SKIP_BIK`.
   Hub = casa de Bob Esponja.
-- Bugs de render abiertos: los láseres de seguridad del museo (nivel 3) salen sin
-  textura (**dificulta avanzar → prioridad**); el agua y los arcoíris se ven raros;
-  falta un modelo de objeto en el nivel 1. Velocidad: el pacing a reloj real está en `pace_virtual_time_to_wall_clock()`.
+- Render (2026-11-21, verificado por el usuario): láseres, cielos, agua, lava, ácido,
+  nubes, sombras, lámparas y el objeto del nivel 1 ya se ven (matriz de textura 0x40/0x41
+  y blend con alfa sin cuantizar). Abierto: detalles estéticos en algunas texturas de
+  los peces del hub. Velocidad: el pacing a reloj real está en `pace_virtual_time_to_wall_clock()`.
 - Heap del motor: `CPSPSystem::InitializeHeap` usa `sceKernelMaxFreeMemSize() - 1 MiB`.
   La memoria libre se calcula de verdad (arena después del módulo, `0x08B70000`,
   hasta los stacks). `[0x08B61000, 0x08B70000)` es scratch del host.
@@ -136,7 +137,10 @@ marcarlos así.
 - `PSPRECOMP_NO_FRAME_PACING` — sin límite a tiempo real (**usar en pruebas headless**, van ~1.7× más rápido);
   `PSPRECOMP_PACE_DIAG` — imprime la razón tiempo virtual / reloj real.
 - `PSPRECOMP_GE_UNSUPPORTED_DIAG` — trabajo del GE que el renderer descarta (incluye puntos/líneas que no llegan a Vulkan).
-- `PSPRECOMP_GE_TEXTURE_LOG` — cada textura/estado de blend distinto la primera vez que se dibuja.
+- `PSPRECOMP_GE_TEXTURE_LOG` — cada textura/estado de blend distinto la primera vez que se dibuja
+  (con uvgen, matriz de textura, formato de framebuffer, alpha/depth test) y cada `WHITE FALLBACK`.
+- `PSPRECOMP_GE_SKIP_TEXTURE=<addr,...>` — omite los draws con esas texturas (identificar objetos).
+- `PSPRECOMP_GE_DUMP_TEXTURE=<addr>[,dir]` — vuelca la textura decodificada a `.pam`.
 - `PSPRECOMP_GAME_LOG` — imprime el log de debug del motor (`[game] ...`). **Primer recurso para depurar.**
 - `PSPRECOMP_MAX_DISPATCHES` — tope de dispatches (default 4 000 000 000).
 - `PSPRECOMP_SPIN_YIELD_TICKS` — ticks con el mismo PC antes de forzar yield (default 4).
