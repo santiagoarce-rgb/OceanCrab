@@ -405,6 +405,8 @@ void ge_gpu_backend_display_logical_size(std::uint32_t &width, std::uint32_t &he
     std::span<std::byte> destination) noexcept;
 
 [[nodiscard]] bool ge_gpu_backend_presents_directly() noexcept;
+// Name of the Vulkan device in use (empty before init).
+const std::string &ge_gpu_backend_device_name() noexcept;
 
 [[nodiscard]] std::uint32_t ge_gpu_backend_owned_framebuffer() noexcept;
 

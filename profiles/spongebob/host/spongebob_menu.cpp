@@ -1,6 +1,7 @@
 #include "spongebob_menu.hpp"
 
 #include "spongebob_render_config.hpp"
+#include "ge_gpu_backend.hpp"
 
 #include <SDL.h>
 #include <imgui.h>
@@ -74,6 +75,7 @@ void graphics_menu() {
     RenderingConfiguration &rendering = config.rendering;
 
     ImGui::SeparatorText("Rendering");
+    if (!ge_gpu_backend_device_name().empty()) ImGui::TextDisabled("GPU: %s", ge_gpu_backend_device_name().c_str());
     // Internal resolution: PSP native or an integer multiple of 480x272.
     std::uint32_t scale = rendering.internal_resolution_mode == InternalResolutionMode::Scale
                               ? rendering.internal_scale : 1u;

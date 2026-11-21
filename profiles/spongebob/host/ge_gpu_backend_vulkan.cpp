@@ -1371,6 +1371,8 @@ bool run_offscreen_self_test(VulkanState &s, std::string &error) {
     return true;
 }
 
+std::string g_device_name;  // chosen Vulkan device, shown in the F1 menu
+
 // The per-frame readback is read by the CPU. Plain HOST_VISIBLE|HOST_COHERENT
 // memory is usually uncached (write-combined), and reading 4.7 MB of it per
 // frame at 3x took ~30 ms. Prefer HOST_CACHED memory (coherent if possible,
@@ -1459,6 +1461,12 @@ bool create_backend(VulkanState &s, std::string &error) {
             s.physical = candidate;
             break;
         }
+    }
+    {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(s.physical, &properties);
+        g_device_name = properties.deviceName;
+        std::cerr << "[vulkan] using GPU: " << g_device_name << " (of " << device_count << ")\n";
     }
     std::uint32_t family_count = 0u;
     vkGetPhysicalDeviceQueueFamilyProperties(s.physical, &family_count, nullptr);
@@ -2434,6 +2442,7 @@ bool ge_gpu_backend_copy_game_frame_rgba(std::span<std::byte> destination) noexc
     return true;
 }
 bool ge_gpu_backend_presents_directly() noexcept { return false; }
+const std::string &ge_gpu_backend_device_name() noexcept { return g_device_name; }
 std::uint32_t ge_gpu_backend_owned_framebuffer() noexcept {
     const VulkanState &s = state();
     return s.enabled ? s.display_framebuffer : 0u;
