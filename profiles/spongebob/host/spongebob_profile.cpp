@@ -12,7 +12,9 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -1516,6 +1518,77 @@ void register_movie_skip(psprecomp::Runtime &rt) {
 // null at 0x08943080. Replace the accessor with a stub that returns 0; the
 // callers ignore v0.
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Engine debug log (opt-in with PSPRECOMP_GAME_LOG=1).
+//
+// The Whiptail engine's debug printf is sub_089C9E34(fmt, ...): it vsprintf's
+// into a stack buffer and hands it to sub_089C9D14(channel, message), which
+// filters by channel (off in retail) and forwards to libc printf. The messages
+// name engine classes (CPSPSystem, CWFileMgr, ...) and report failures such as
+// missing resources. The sink cannot be hooked (its caller reaches it through
+// an intra-unit goto), so replace the printf entry and format it here. Callers
+// inside the same generated unit still bypass the hook.
+// ---------------------------------------------------------------------------
+std::string format_guest_printf(psprecomp::Runtime &rt, const psprecomp::AllegrexContext &ctx) {
+    // Allegrex EABI-style varargs: fmt in a0, integer args in a1-a3, t0-t3.
+    static constexpr int kArgRegs[] = {5, 6, 7, 8, 9, 10, 11};
+    std::size_t next_arg = 0u;
+    const auto arg = [&]() -> std::uint32_t {
+        return next_arg < std::size(kArgRegs) ? ctx.gpr[kArgRegs[next_arg++]] : 0u;
+    };
+    std::string fmt;
+    try { fmt = rt.memory().read_c_string(ctx.gpr[4], 1024u); } catch (...) { return {}; }
+    std::string out;
+    for (std::size_t i = 0u; i < fmt.size(); ++i) {
+        if (fmt[i] != '%') { out += fmt[i]; continue; }
+        std::size_t j = i + 1u;
+        while (j < fmt.size() && std::strchr("-+ #0123456789.lhz", fmt[j]) != nullptr) ++j;
+        if (j >= fmt.size()) break;
+        const std::string spec = fmt.substr(i, j - i);  // flags/width without length mods.
+        std::string clean;
+        for (char c : spec) if (c != 'l' && c != 'h' && c != 'z') clean += c;
+        char buffer[512];
+        switch (fmt[j]) {
+        case '%': out += '%'; break;
+        case 's': {
+            std::string text;
+            const std::uint32_t address = arg();
+            try { text = address != 0u ? rt.memory().read_c_string(address, 256u) : "(null)"; } catch (...) { text = "(bad)"; }
+            std::snprintf(buffer, sizeof buffer, (clean + 's').c_str(), text.c_str());
+            out += buffer;
+            break;
+        }
+        case 'd': case 'i':
+            std::snprintf(buffer, sizeof buffer, (clean + 'd').c_str(), static_cast<int>(arg()));
+            out += buffer;
+            break;
+        case 'u': case 'x': case 'X': case 'o': case 'c':
+            std::snprintf(buffer, sizeof buffer, (clean + fmt[j]).c_str(), static_cast<unsigned>(arg()));
+            out += buffer;
+            break;
+        case 'p':
+            out += psprecomp::hex32(arg());
+            break;
+        default:  // floats etc. are not decoded; show the raw word.
+            out += "<" + spec + fmt[j] + ":" + psprecomp::hex32(arg()) + ">";
+            break;
+        }
+        i = j;
+    }
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
+    return out;
+}
+
+void register_game_log(psprecomp::Runtime &rt) {
+    if (std::getenv("PSPRECOMP_GAME_LOG") == nullptr) return;
+    rt.register_function(0x089C9E34u,
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            std::cerr << "[game] " << format_guest_printf(rt, ctx) << "\n";
+            ctx.pc = ctx.gpr[31];
+        },
+        "game_debug_printf");
+}
+
 void register_menu_bg_skip(psprecomp::Runtime &rt) {
     if (std::getenv("PSPRECOMP_SKIP_BIK") == nullptr) return;
 
@@ -1580,6 +1653,7 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
 
     register_movie_skip(rt);    // Fake Movie object — skips the cutscene (PSPRECOMP_SKIP_BIK).
     register_menu_bg_skip(rt);  // Fake menu background skip — menu_bkg.pvs is missing.
+    register_game_log(rt);      // PSPRECOMP_GAME_LOG: print the engine's debug messages.
 
     // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
     // syscall, syscall 0) jumps to guest address 0. Map it to the thread
