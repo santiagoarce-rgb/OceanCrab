@@ -30,7 +30,7 @@ The long-term goal is a full PC port in the spirit of community projects such as
 ## Status
 
 > [!NOTE]
-> **Completable.** The game boots, plays its Bink videos natively and can be played from New Game to the ending credits. Minigames work too. Some rendering bugs remain (see below).
+> **Completable.** The game boots, plays its Bink videos natively and can be played from New Game to the ending credits. Minigames work too. A few minor texture glitches remain (see below).
 
 | Area | | Notes |
 |---|:---:|---|
@@ -41,16 +41,13 @@ The long-term goal is a full PC port in the spirit of community projects such as
 | Input | ✅ | Keyboard and gamepads (SDL2) |
 | File I/O | ✅ | `sceIo*` streaming from your extracted `PSP_GAME/USRDIR` |
 | Menus | ✅ | Main menu, Story Mode, Credits, Options |
-| Gameplay | ✅ | Playable start to finish (levels, boss, ending, minigames); rendering bugs listed below |
+| Gameplay | ✅ | Playable start to finish (levels, boss, ending, minigames) |
 | VFPU | 🚧 | Translated by the code generator; the instructions the Bink decoder uses all run. Remaining unlowered sites are being audited |
-| Bink videos | 🚧 | Decoded natively with correct colors; video audio is still silent |
+| Bink videos | ✅ | Decoded natively, with correct colors and audio |
 
 ### Current investigation
 
-- **Bink audio.** The decoder's audio thread exits right after it starts, so videos are silent.
-- **Missing textures.** The museum security lasers (level 3) render without textures, which makes that section hard to pass. Water and rainbow textures look wrong, and one object model in the first level does not load.
-
-`PSPRECOMP_SKIP_BIK=1` still replaces the video pipeline with stubs (a fake Bink header and a "finished" Movie object). It is no longer needed to reach the title screen, and the plan is to remove it.
+- **Minor texture glitches.** A few fish textures in the hub still look wrong.
 
 ## How it works
 
@@ -134,12 +131,11 @@ The first build of the generated units takes a while.
 ### 5. Play
 
 ```bash
-PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
+PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
 ```
 
 | Variable | Purpose |
 |---|---|
-| `PSPRECOMP_SKIP_BIK=1` | Skip the Bink videos with stub objects (workaround, being phased out) |
 | `PSPRECOMP_AUDIO=1` | Enable audio output |
 
 Display, rendering and timing options live in [`profiles/spongebob/config/SpongeBobNative.ini`](profiles/spongebob/config/SpongeBobNative.ini). Every CMake option and environment variable, including the debugging ones, is documented in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md).

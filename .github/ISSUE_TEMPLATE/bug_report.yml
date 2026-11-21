@@ -27,7 +27,7 @@ body:
       label: Steps to reproduce
       description: Include the exact command and environment variables
       placeholder: |
-        PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
+        PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
         1. Select New Game
         2. ...
     validations:

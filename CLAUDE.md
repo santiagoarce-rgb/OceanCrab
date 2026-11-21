@@ -48,7 +48,7 @@ Necesita `profiles/spongebob/original/ULUS10478_EBOOT.ELF` (descifrado, del usua
 ## Correr
 
 ```bash
-PSPRECOMP_SKIP_BIK=1 PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
+PSPRECOMP_AUDIO=1 ./out/crab/profiles/spongebob/SpongeBobNative
 ```
 
 Los assets se leen de `profiles/spongebob/original/PSP_GAME/USRDIR/`.
@@ -70,13 +70,13 @@ tres etapas grandes:
    Windows/macOS.
 
 Al proponer arreglos: preferir la causa raíz y documentar las estructuras del
-juego. Los hooks de `PSPRECOMP_SKIP_BIK` son **deuda técnica** y hay que
-marcarlos así.
+juego. Los workarounds (hooks que fingen resultados) son **deuda técnica** y hay
+que marcarlos así.
 
 ## Estado actual (2026-11-20)
 
 - **El juego se puede terminar de principio a fin** (verificado por el usuario el
-  2026-11-20: niveles, jefe final, créditos y minijuegos), sin `PSPRECOMP_SKIP_BIK`.
+  2026-11-20: niveles, jefe final, créditos y minijuegos).
   Hub = casa de Bob Esponja.
 - Render (2026-11-21, verificado por el usuario): láseres, cielos, agua, lava, ácido,
   nubes, sombras, lámparas y el objeto del nivel 1 ya se ven (matriz de textura 0x40/0x41
@@ -92,9 +92,8 @@ marcarlos así.
   en las intros, pero hay que auditarlos (¿código real o datos?).
 - Los hooks de `register_function` **deben** poner `ctx.pc = ctx.gpr[31]` al
   regresar; si no, el dispatcher los vuelve a llamar en loop.
-- `PSPRECOMP_SKIP_BIK=1` (deuda, ya no hace falta): header Bink falso,
-  `sub_08943694` → objeto Movie falso, `sub_08943060` → 0 (falta `menu_bkg.pvs`).
-  El Memory Stick falso sí se usa siempre.
+- `PSPRECOMP_SKIP_BIK` se eliminó (2026-11-21): Bink corre nativo con audio. El
+  Memory Stick falso sí se usa siempre.
 - `PSPRECOMP_NULL_JUMP_CHECK` (commit `cf37156`) atrapa `jr`/`jalr` a 0 y vuelca
   los registros.
 
@@ -128,7 +127,6 @@ marcarlos así.
 ### Variables de entorno (runtime)
 
 **Juego / workarounds**
-- `PSPRECOMP_SKIP_BIK` — salta los videos Bink y activa los hooks de Movie/menú.
 - `PSPRECOMP_AUDIO` — activa salida de audio.
 - `PSPRECOMP_CONFIG` — ruta alternativa al `.ini`.
 - `PSPRECOMP_SIMULATE_BUTTON=<mask>` — OR de botones PSP en cada lectura de pad (pruebas headless).

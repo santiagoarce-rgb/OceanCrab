@@ -26,7 +26,6 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 
 | Variable | Effect |
 |---|---|
-| `PSPRECOMP_SKIP_BIK` | Skip the Bink videos and enable the related compatibility hooks (fake Movie object, missing menu background). Required until VFPU is supported. |
 | `PSPRECOMP_AUDIO` | Enable audio output. |
 | `PSPRECOMP_CONFIG=<path>` | Use a different `.ini` file. |
 | `PSPRECOMP_SIMULATE_BUTTON=<mask>` | OR a PSP button bitmask into every pad read (headless testing). |

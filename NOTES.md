@@ -494,8 +494,9 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Las nubes del menú salen en headless hacia el frame 1000 (escena de la isla,
   antes de que baje la cámara); el título con casas, hacia el 1250.
 - Abierto: detalles estéticos en algunas texturas de los peces del hub.
+- Se eliminó `PSPRECOMP_SKIP_BIK` (header Bink falso, objeto Movie falso en
+  `sub_08943694`, `sub_08943060` → 0). `[0x08B61000, 0x08B70000)` queda libre.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
-2. Borrar hooks de `PSPRECOMP_SKIP_BIK` y la fase 2 (simbolización con ayuda de
-   `PSPRECOMP_GAME_LOG`).
+2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.
