@@ -25,6 +25,7 @@
 #include <mutex>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 #include <thread>
 #include <vector>
 
@@ -3906,6 +3907,40 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
     if (ge_phase_diag_enabled()) {
         ++g_ge_primitive_count;
         g_ge_vertex_count += count;
+    }
+
+    // PSPRECOMP_GE_TEXTURE_LOG: print each distinct texture setup the first time
+    // it is drawn (address, format, size, CLUT format, texture function).
+    static const bool texture_log = std::getenv("PSPRECOMP_GE_TEXTURE_LOG") != nullptr;
+    if (texture_log && (data24(commands[0x1Eu]) & 1u) != 0u) {
+        static std::unordered_set<std::uint64_t> seen;
+        const std::uint32_t address = texture_address(commands, 0u);
+        const std::uint32_t format = data24(commands[0xC3u]) & 0xFu;
+        const std::uint32_t size = data24(commands[0xB8u]);
+        const std::uint32_t clut = data24(commands[0xC5u]);
+        const std::uint32_t function = data24(commands[0xC9u]);
+        const std::uint64_t key = (static_cast<std::uint64_t>(address) << 32u) ^
+            (static_cast<std::uint64_t>(format) << 24u) ^ (static_cast<std::uint64_t>(size) << 4u) ^
+            (static_cast<std::uint64_t>(clut & 3u) << 28u) ^ (function & 0x10107u) ^
+            (static_cast<std::uint64_t>(data24(commands[0xDFu])) << 40u) ^
+            (static_cast<std::uint64_t>(data24(commands[0xE8u])) << 20u) ^ data24(commands[0xC5u]);
+        if (seen.insert(key).second) {
+            std::cerr << "[ge-texture] addr=" << psprecomp::hex32(address) << " fmt=" << format
+                      << " size=" << (1u << (size & 0xFu)) << "x" << (1u << ((size >> 8u) & 0xFu))
+                      << " bufw=" << (data24(commands[0xA8u]) & 0x7FFu)
+                      << " clutfmt=" << (clut & 3u) << " tfunc=" << (function & 7u)
+                      << " alpha=" << ((function >> 8u) & 1u) << " through=" << layout.through
+                      << " prim=" << primitive
+                      << " blend_en=" << (data24(commands[0x21u]) & 1u)
+                      << " blend=" << psprecomp::hex32(data24(commands[0xDFu]))
+                      << " fixA=" << psprecomp::hex32(data24(commands[0xE0u]))
+                      << " fixB=" << psprecomp::hex32(data24(commands[0xE1u]))
+                      << " maskrgb=" << psprecomp::hex32(data24(commands[0xE8u]))
+                      << " maskA=" << psprecomp::hex32(data24(commands[0xE9u]))
+                      << " clut=" << psprecomp::hex32(clut)
+                      << " clutaddr=" << psprecomp::hex32(((data24(commands[0xB1u]) & 0x0F0000u) << 8u) | data24(commands[0xB0u]))
+                      << "\n";
+        }
     }
 
     const bool gpu_backend_enabled = ge_gpu_backend_active();
