@@ -5,6 +5,7 @@
 #include "ge_gpu_backend.hpp"
 #include "ge_renderer.hpp"
 #include "ge_diag.hpp"
+#include "spongebob_frame_limit.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/guest_memory.hpp"
@@ -830,15 +831,49 @@ DisplayState display_state{};
         duration_cast<microseconds>(steady_clock::now() - start).count());
 }
 
-// Advance virtual time by the real elapsed microseconds since the last poll and
-// return the new value. Guest code that spins on sceKernelGetSystemTime* without
-// dispatching enough to trip the starvation hook still sees the clock move.
+// Guest system time is virtual time. Each poll nudges it forward by 1 us, so a
+// spinner on sceKernelGetSystemTime* always sees the clock move. It used to add
+// the wall-clock delta on top of virtual time, which counted real time twice.
 std::uint64_t advance_system_time() {
-    static std::uint64_t last_wall_us = 0u;
-    const std::uint64_t now = guest_time_us();
-    if (now > last_wall_us) virtual_time_us += now - last_wall_us;
-    last_wall_us = now;
+    virtual_time_us += 1u;
     return virtual_time_us;
+}
+
+// Frame pacing: keep virtual time from running ahead of the wall clock.
+// Virtual time jumps straight to the next VBlank when every thread is waiting,
+// so without this the game runs as fast as the host executes it. Called at each
+// VBlank wait. If the host falls behind by more than kMaxLagUs, re-anchor
+// instead of racing to catch up. PSPRECOMP_NO_FRAME_PACING=1 disables it, for
+// fast headless runs; PSPRECOMP_PACE_DIAG=1 prints the virtual/wall ratio.
+void pace_virtual_time_to_wall_clock() {
+    static const bool disabled = std::getenv("PSPRECOMP_NO_FRAME_PACING") != nullptr;
+    static const bool diag = std::getenv("PSPRECOMP_PACE_DIAG") != nullptr;
+    constexpr std::int64_t kMaxLagUs = 100000;
+    static std::int64_t offset_us = 0;  // wall + offset == virtual when on time.
+    static std::uint64_t calls = 0u, diag_virtual = 0u, diag_wall = 0u, slept_us = 0u;
+    const auto wall = static_cast<std::int64_t>(guest_time_us());
+    const auto virt = static_cast<std::int64_t>(virtual_time_us);
+    if (calls++ == 0u) offset_us = virt - wall;
+    const std::int64_t ahead = virt - (wall + offset_us);
+    if (disabled) {
+        // keep the anchor current so enabling later would not stall.
+        offset_us = virt - wall;
+    } else if (ahead > 0) {
+        precise_sleep_until(std::chrono::steady_clock::now() + std::chrono::microseconds(ahead));
+        slept_us += static_cast<std::uint64_t>(ahead);
+    } else if (-ahead > kMaxLagUs) {
+        offset_us = virt - wall;  // host too slow: drop the debt, do not sprint.
+    }
+    if (diag && calls % 300u == 0u) {
+        const std::uint64_t now_wall = guest_time_us();
+        const double dv = static_cast<double>(virtual_time_us - diag_virtual) / 1e6;
+        const double dw = static_cast<double>(now_wall - diag_wall) / 1e6;
+        std::cerr << "[pace] virtual=" << dv << "s wall=" << dw << "s speed=" << (dw > 0.0 ? dv / dw : 0.0)
+                  << "x slept=" << static_cast<double>(slept_us) / 1e6 << "s\n";
+        diag_virtual = virtual_time_us;
+        diag_wall = now_wall;
+        slept_us = 0u;
+    }
 }
 
 std::uint32_t allocate_stack(std::uint32_t size) {
@@ -1434,6 +1469,7 @@ void register_display_hle(psprecomp::Runtime &rt) {
         }
         // Advance GE and present the current frame before parking.
         spongebob_profile_tick(rt);
+        pace_virtual_time_to_wall_clock();
         const std::uint64_t phase = virtual_time_us % kVblankPeriodUs;
         suspend_for_wakeup(rt, ctx, virtual_time_us + (kVblankPeriodUs - phase));
     };
