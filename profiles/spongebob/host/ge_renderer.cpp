@@ -3909,6 +3909,30 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
         g_ge_vertex_count += count;
     }
 
+    // PSPRECOMP_GE_SKIP_TEXTURE=<addr,addr,...>: drop every draw that samples
+    // one of these texture addresses (debug aid to identify which texture an
+    // on-screen object uses by comparing frame dumps).
+    static const std::vector<std::uint32_t> skipped_textures = [] {
+        std::vector<std::uint32_t> list;
+        const char *text = std::getenv("PSPRECOMP_GE_SKIP_TEXTURE");
+        while (text != nullptr && *text != '\0') {
+            char *end = nullptr;
+            const unsigned long value = std::strtoul(text, &end, 0);
+            if (end == text) break;
+            list.push_back(static_cast<std::uint32_t>(value));
+            text = (*end == ',') ? end + 1 : end;
+        }
+        return list;
+    }();
+    if (!skipped_textures.empty() && (data24(commands[0x1Eu]) & 1u) != 0u &&
+        std::find(skipped_textures.begin(), skipped_textures.end(),
+                  texture_address(commands, 0u)) != skipped_textures.end()) {
+        const std::uint32_t skip_isize = index_size(layout.index_type);
+        if (skip_isize == 0u) stats.next_vertex_address = vertex_address + count * layout.stride;
+        else stats.next_index_address = index_address + count * skip_isize;
+        return true;
+    }
+
     // PSPRECOMP_GE_TEXTURE_LOG: print each distinct texture setup the first time
     // it is drawn (address, format, size, CLUT format, texture function).
     static const bool texture_log = std::getenv("PSPRECOMP_GE_TEXTURE_LOG") != nullptr;
@@ -3934,6 +3958,17 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
                       << " uvgen=" << (data24(commands[0xC0u]) & 3u)
                       << " uvsrc=" << ((data24(commands[0xC0u]) >> 8u) & 3u)
                       << " mip=" << ((data24(commands[0xC2u]) >> 16u) & 7u)
+                      << " tc=" << layout.tc_type
+                      << ((data24(commands[0xC0u]) & 3u) == 1u ? " texmtx=[" + [&] {
+                             std::string m;
+                             for (std::size_t i = 0u; i < 12u; ++i)
+                                 m += (i ? "," : "") + std::to_string(transform.texture[i]);
+                             return m + "]";
+                         }() : std::string{})
+                      << " fbpsm=" << (data24(commands[0xD2u]) & 3u)
+                      << " atest_en=" << (data24(commands[0x22u]) & 1u)
+                      << " atest=" << psprecomp::hex32(data24(commands[0xDBu]))
+                      << " ztest_en=" << (data24(commands[0x23u]) & 1u)
                       << " blend_en=" << (data24(commands[0x21u]) & 1u)
                       << " blend=" << psprecomp::hex32(data24(commands[0xDFu]))
                       << " fixA=" << psprecomp::hex32(data24(commands[0xE0u]))
@@ -4170,6 +4205,27 @@ bool render_ge_primitive(psprecomp::GuestMemory &memory,
                 break;
             }
             offset += bytes;
+        }
+        // PSPRECOMP_GE_DUMP_TEXTURE=<addr>[,dir]: write the decoded level-0 RGBA of
+        // that texture (each distinct upload, up to 8) as PAM files for inspection.
+        static const char *dump_texture_env = std::getenv("PSPRECOMP_GE_DUMP_TEXTURE");
+        if (all && dump_texture_env != nullptr &&
+            std::strtoul(dump_texture_env, nullptr, 0) == texture_address(commands, 0u)) {
+            static unsigned dumped = 0u;
+            if (dumped < 8u) {
+                const char *comma = std::strchr(dump_texture_env, ',');
+                const std::string dir = comma != nullptr ? std::string(comma + 1) : std::string(".");
+                const std::string path = dir + "/texture_" + psprecomp::hex32(texture_address(commands, 0u)) +
+                                         "_" + std::to_string(dumped++) + ".pam";
+                if (std::FILE *f = std::fopen(path.c_str(), "wb")) {
+                    std::fprintf(f, "P7\nWIDTH %u\nHEIGHT %u\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n",
+                                 mip_setups[0].width, mip_setups[0].height);
+                    std::fwrite(decoded.data(), 1u,
+                                static_cast<std::size_t>(mip_setups[0].width) * mip_setups[0].height * 4u, f);
+                    std::fclose(f);
+                    std::cerr << "[ge-texture] dumped " << path << "\n";
+                }
+            }
         }
         if (all) {
             (void)ge_gpu_backend_upload_decoded_texture_chain_packed(
