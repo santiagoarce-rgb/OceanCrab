@@ -30,6 +30,8 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_AUDIO` | Enable audio output. |
 | `PSPRECOMP_CONFIG=<path>` | Use a different `.ini` file. |
 | `PSPRECOMP_SIMULATE_BUTTON=<mask>` | OR a PSP button bitmask into every pad read (headless testing). |
+| `PSPRECOMP_INPUT_SCRIPT=<first-last=mask,...>` | Hold a button mask during ranges of presented frames, so menus see press/release edges. Example: `1300-1305=0x8,1500-1505=0x4000` (Start, then Cross). |
+| `PSPRECOMP_GAME_LOG` | Print the engine's own debug messages (`[game] ...`): class names, package loads, load failures. |
 | `PSPRECOMP_MAX_DISPATCHES=<n>` | Stop after `n` dispatches (default 4,000,000,000). |
 | `PSPRECOMP_SPIN_YIELD_TICKS=<n>` | Ticks on the same PC before the scheduler forces a yield (default 4). |
 

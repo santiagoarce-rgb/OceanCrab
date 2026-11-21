@@ -376,3 +376,28 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   más ~6 900 `unknown`; probablemente sean datos decodificados como código.
   Auditarlos.
 - Nuevo: `PSPRECOMP_DUMP_FRAME_AT=<n,n,...>` (`d579f2a`).
+
+## Sesión 2026-11-20 (3) — 🎯 New Game llega a gameplay
+
+- El usuario confirmó en vivo que los videos se ven (sin azul, sin audio) y que
+  New Game reproduce la cinemática y truena al terminar.
+- Para reproducirlo en headless se añadió `PSPRECOMP_INPUT_SCRIPT` (ver CLAUDE.md
+  para el guion que llega a gameplay).
+- Crash en `0x08943728`: `sub_08943694` dereferencia el 0 que devuelve
+  `0x089A7690` (búsqueda de recurso; llama al printf de debug si falla).
+- **`PSPRECOMP_GAME_LOG`**: hook a `sub_089C9E34`, el printf de debug del motor
+  ("Whiptail Engine"). El log dijo directamente:
+  `CWGraphics3D::LoadMesh - Could not load patrick.msh` (el archivo sí está en
+  hub.pkg/lvlcmn.pkg).
+- Causa raíz: `CPSPSystem::InitializeHeap` crea una FPL de
+  `MaxFreeMemSize - 1 MiB`; el HLE devolvía 8 MiB fijos → heap de 6.6 MiB. Fix
+  (`e023fe3`): memoria libre real (arena desde `0x08B70000`), reuso de stacks
+  de threads borrados y objeto Movie falso movido a scratch. Heap: 19.5 MiB.
+  Esto también explica el viejo `operator new` → 0 al crear personajes.
+- Resultado: hub del Krusty Krab con HUD y Patrick; 32k+ frames sin crash.
+- Pistas falsas descartadas: `[io] open/read/getstat` se truncan tras 30 líneas
+  (`traced < 30`); `sceIoReadAsync/PollAsync` (stubs) solo los usa el módulo de
+  E/S de Bink (`0x089E9xxx`), no el cargador de paquetes.
+- Abierto: Bink sin canal azul; "Bink audio thread" (entrada `0x089CCAE4`)
+  termina al instante → videos sin audio. Overrides con `register_function` no
+  atrapan llamadas que caen dentro de la misma unit (goto interno).

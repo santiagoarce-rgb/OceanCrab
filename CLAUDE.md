@@ -75,21 +75,20 @@ marcarlos así.
 
 ## Estado actual (2026-11-20)
 
-- Bota, corre el main loop, renderiza (Vulkan) con audio e input. **Llega al menú
-  principal**; Story Mode, Credits y Options son navegables.
-- **Bink corre nativo sin `PSPRECOMP_SKIP_BIK`**: las intros (nick, thq, blt) se
-  reproducen y el juego llega al title screen. **Bug abierto: colores** (solo la
-  luminancia, en un canal). Hay que revisar YUV→RGB o el formato de textura en el GE.
-  Aún quedan ~1 950 sitios `vfpu*/cop2 not lowered` en el corpus; no se ejecutan
+- Bota, corre el main loop, renderiza (Vulkan) con audio e input. **New Game llega a
+  gameplay** (hub del Krusty Krab), sin `PSPRECOMP_SKIP_BIK`.
+- Heap del motor: `CPSPSystem::InitializeHeap` usa `sceKernelMaxFreeMemSize() - 1 MiB`.
+  La memoria libre se calcula de verdad (arena después del módulo, `0x08B70000`,
+  hasta los stacks). `[0x08B61000, 0x08B70000)` es scratch del host.
+- Abierto: los videos Bink no tienen canal azul y no tienen audio (el "Bink audio
+  thread" termina apenas arranca).
+- Bink corre nativo. Aún quedan ~1 950 sitios `vfpu*/cop2 not lowered` en el corpus; no se ejecutan
   en las intros, pero hay que auditarlos (¿código real o datos?).
 - Los hooks de `register_function` **deben** poner `ctx.pc = ctx.gpr[31]` al
   regresar; si no, el dispatcher los vuelve a llamar en loop.
-- Con `PSPRECOMP_SKIP_BIK=1`, "New Game" pasa del menú gracias a estos hooks
-  (`spongebob_profile.cpp`): header Bink falso, `sub_08943694` → objeto Movie
-  falso "completo", `sub_08943060` → 0 (falta `menu_bkg.pvs`) y un Memory Stick
-  falso. Los personajes 3D aún no se crean: en la cadena de constructores
-  `0x0894C094 → 0x0894E4E4 → 0x08956928` llega `this = null` porque
-  `operator new` (`0x089C4998`) devuelve 0.
+- `PSPRECOMP_SKIP_BIK=1` (deuda, ya no hace falta): header Bink falso,
+  `sub_08943694` → objeto Movie falso, `sub_08943060` → 0 (falta `menu_bkg.pvs`).
+  El Memory Stick falso sí se usa siempre.
 - `PSPRECOMP_NULL_JUMP_CHECK` (commit `cf37156`) atrapa `jr`/`jalr` a 0 y vuelca
   los registros.
 
@@ -127,6 +126,9 @@ marcarlos así.
 - `PSPRECOMP_AUDIO` — activa salida de audio.
 - `PSPRECOMP_CONFIG` — ruta alternativa al `.ini`.
 - `PSPRECOMP_SIMULATE_BUTTON=<mask>` — OR de botones PSP en cada lectura de pad (pruebas headless).
+- `PSPRECOMP_INPUT_SCRIPT=<first-last=mask,...>` — botones por rango de frames (flancos para menús).
+  Llegar a gameplay en headless: `1300-1305=0x8,1500-1505=0x4000,1700-1705=0x4000,1900-1905=0x4000,2100-2105=0x4000`.
+- `PSPRECOMP_GAME_LOG` — imprime el log de debug del motor (`[game] ...`). **Primer recurso para depurar.**
 - `PSPRECOMP_MAX_DISPATCHES` — tope de dispatches (default 4 000 000 000).
 - `PSPRECOMP_SPIN_YIELD_TICKS` — ticks con el mismo PC antes de forzar yield (default 4).
 

@@ -30,7 +30,7 @@ The long-term goal is a full PC port in the spirit of community projects such as
 ## Status
 
 > [!NOTE]
-> **Main menu reached.** The game boots, runs its main loop and renders the menu with working audio and input. Story Mode, Credits and Options can be navigated.
+> **Gameplay reached.** The game boots, plays its Bink videos natively, and **New Game** loads the first level (the Krusty Krab hub) with the HUD, characters and working input.
 
 | Area | | Notes |
 |---|:---:|---|
@@ -41,16 +41,14 @@ The long-term goal is a full PC port in the spirit of community projects such as
 | Input | ✅ | Keyboard and gamepads (SDL2) |
 | File I/O | ✅ | `sceIo*` streaming from your extracted `PSP_GAME/USRDIR` |
 | Menus | ✅ | Main menu, Story Mode, Credits, Options |
-| Gameplay | 🚧 | **New Game** gets past the menu with workarounds; 3D characters are not created yet |
+| Gameplay | 🚧 | **New Game** reaches the Krusty Krab hub; playability beyond that is untested |
 | VFPU | 🚧 | Translated by the code generator; the instructions the Bink decoder uses all run. Remaining unlowered sites are being audited |
 | Bink videos | 🚧 | Intro videos decode and play through to the title screen; colors are wrong (luma only) |
 
 ### Current investigation
 
-Two things block gameplay. They are probably related:
-
-- **Bink colors.** The statically linked Bink decoder now runs natively and the intro videos play, but frames show only luminance in a single channel. The YUV → RGB path (or the video texture format in the GE) is under investigation.
-- **Allocation failure in character setup.** A constructor chain (`0x0894C094 → 0x0894E4E4 → 0x08956928`) receives `this = null` because `operator new` (`0x089C4998`) returns 0. The failing heap path is being traced.
+- **Bink colors.** The statically linked Bink decoder runs natively, but video frames have no blue channel (only red/green). The YUV → RGB path, or the video texture format in the GE, is under investigation.
+- **Bink audio.** The decoder's audio thread exits right after it starts, so videos are silent.
 
 `PSPRECOMP_SKIP_BIK=1` still replaces the video pipeline with stubs (a fake Bink header and a "finished" Movie object). It is no longer needed to reach the title screen, and the plan is to remove it.
 
