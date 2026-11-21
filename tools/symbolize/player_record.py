@@ -6,7 +6,9 @@ pressed, lists the object words that react within a short window after the
 press, ranked by how consistently they react. That is how jump height, attack
 state, timers and flags show up.
 
-usage: player_record.py <record.bin> [--window N] [--top N]
+Also reads PSPRECOMP_OBJECT_RECORD files (any class; one report per object).
+
+usage: player_record.py <record.bin> [--window N] [--top N] [--min-frames N]
 """
 import argparse
 import struct
@@ -23,15 +25,28 @@ BUTTONS = {
 
 
 def load(path):
+    """Returns {(address, vtable): [(frame, buttons, lx, ly, address, words)]}."""
     data = open(path, 'rb').read()
-    if data[:4] != b'SBR1':
-        sys.exit('not a PSPRECOMP_PLAYER_RECORD file')
-    frames = []
-    for off in range(4, len(data) - RECORD + 1, RECORD):
-        frame, buttons, stick, entity = struct.unpack_from('<4I', data, off)
-        words = struct.unpack_from(f'<{OBJECT_SIZE // 4}I', data, off + 16)
-        frames.append((frame, buttons, stick & 0xFF, (stick >> 8) & 0xFF, entity, words))
-    return frames
+    streams = {}
+    if data[:4] == b'SBR1':
+        for off in range(4, len(data) - RECORD + 1, RECORD):
+            frame, buttons, stick, entity = struct.unpack_from('<4I', data, off)
+            words = struct.unpack_from(f'<{OBJECT_SIZE // 4}I', data, off + 16)
+            streams.setdefault((entity, 0x08A74978), []).append(
+                (frame, buttons, stick & 0xFF, (stick >> 8) & 0xFF, entity, words))
+    elif data[:4] == b'SBO1':
+        off = 4
+        while off + 24 <= len(data):
+            frame, buttons, stick, address, vtable, size = struct.unpack_from('<6I', data, off)
+            if off + 24 + size > len(data):
+                break
+            words = struct.unpack_from(f'<{size // 4}I', data, off + 24)
+            streams.setdefault((address, vtable), []).append(
+                (frame, buttons, stick & 0xFF, (stick >> 8) & 0xFF, address, words))
+            off += 24 + size
+    else:
+        sys.exit('not a PSPRECOMP_PLAYER_RECORD / PSPRECOMP_OBJECT_RECORD file')
+    return streams
 
 
 def as_float(word):
@@ -45,18 +60,8 @@ def describe(values):
     return 'int   ' + ' '.join(f'{v:X}' for v in values)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('record')
-    ap.add_argument('--window', type=int, default=20, help='frames after a press to watch')
-    ap.add_argument('--top', type=int, default=15)
-    args = ap.parse_args()
-    frames = load(args.record)
-    if len(frames) < 2:
-        sys.exit('record is empty (was a level loaded?)')
-    print(f'{len(frames)} frames, {frames[0][0]}..{frames[-1][0]}, entity 0x{frames[0][4]:08X}')
-    nwords = OBJECT_SIZE // 4
-
+def report(frames, args):
+    nwords = len(frames[0][5])
     # How often each word changes from one frame to the next, in general.
     base_change = [0] * nwords
     for a, b in zip(frames, frames[1:]):
@@ -86,6 +91,22 @@ def main():
         for score, i in scored:
             values = [f[5][i] for f in frames[max(0, sample - 1):sample + args.window:4]]
             print(f'  +0x{i * 4:03X} score={score:.2f} base={base_rate[i]:.2f}  {describe(values)}')
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('record')
+    ap.add_argument('--window', type=int, default=20, help='frames after a press to watch')
+    ap.add_argument('--top', type=int, default=15)
+    ap.add_argument('--min-frames', type=int, default=120, help='skip short-lived objects')
+    args = ap.parse_args()
+    streams = load(args.record)
+    for (address, vtable), frames in sorted(streams.items(), key=lambda kv: -len(kv[1])):
+        if len(frames) < max(2, args.min_frames):
+            continue
+        print(f'\n######## object 0x{address:08X} vtable 0x{vtable:08X}: {len(frames)} frames '
+              f'({frames[0][0]}..{frames[-1][0]})')
+        report(frames, args)
 
 
 if __name__ == '__main__':

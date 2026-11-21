@@ -1750,6 +1750,71 @@ void player_record_tick(psprecomp::Runtime &rt) {
     if ((frame_present_count % 60u) == 0u) std::fflush(file);  // Ctrl+C loses at most ~1 s
 }
 
+// PSPRECOMP_OBJECT_RECORD=<file>:<vtable>:<size>[:<vtable>:<size>...] records,
+// every presented frame, each live object of the given classes:
+// "SBO1" once, then {u32 frame, u32 buttons, u32 stick (lx | ly << 8),
+// u32 address, u32 vtable, u32 size, u8 object[size]}. Objects are located by
+// a RAM scan once per second and re-validated (vtable still there) every frame.
+// tools/symbolize/player_record.py reads it (one report per object).
+void object_record_tick(psprecomp::Runtime &rt) {
+    struct Spec { std::uint32_t vtable, size; };
+    static std::vector<Spec> specs;
+    static std::FILE *file = [] {
+        const char *env = std::getenv("PSPRECOMP_OBJECT_RECORD");
+        if (env == nullptr) return static_cast<std::FILE *>(nullptr);
+        std::string text(env);
+        const std::size_t colon = text.find(':');
+        if (colon == std::string::npos) return static_cast<std::FILE *>(nullptr);
+        const std::string path = text.substr(0u, colon);
+        const char *p = text.c_str() + colon + 1;
+        while (*p != '\0') {
+            char *end = nullptr;
+            Spec spec{static_cast<std::uint32_t>(std::strtoul(p, &end, 0)), 0x400u};
+            if (end == p) break;
+            if (*end == ':') {
+                p = end + 1;
+                spec.size = static_cast<std::uint32_t>(std::strtoul(p, &end, 0));
+            }
+            specs.push_back(spec);
+            p = (*end == ':') ? end + 1 : end;
+        }
+        std::FILE *f = std::fopen(path.c_str(), "wb");
+        if (f != nullptr) {
+            std::fwrite("SBO1", 1u, 4u, f);
+            std::cerr << "[object-record] writing " << path << " (" << specs.size() << " classes)\n";
+        }
+        return f;
+    }();
+    static std::uint64_t last_frame = ~std::uint64_t{0};
+    static std::vector<std::pair<std::uint32_t, Spec>> live;  // address, class
+    if (file == nullptr || frame_present_count == last_frame) return;
+    last_frame = frame_present_count;
+    constexpr std::uint32_t kScanBegin = 0x08B70000u, kScanEnd = 0x0A000000u;
+    if (frame_present_count % 60u == 0u) {
+        live.clear();
+        const std::uint8_t *ram = rt.memory().raw_pointer(kScanBegin, kScanEnd - kScanBegin);
+        for (std::uint32_t off = 0u; ram != nullptr && off + 4u <= kScanEnd - kScanBegin; off += 4u) {
+            std::uint32_t word;
+            std::memcpy(&word, ram + off, 4u);
+            for (const Spec &spec : specs)
+                if (word == spec.vtable && off + spec.size <= kScanEnd - kScanBegin)
+                    live.emplace_back(kScanBegin + off, spec);
+        }
+    }
+    for (const auto &[address, spec] : live) {
+        if (rt.memory().load32(address) != spec.vtable) continue;
+        const std::uint8_t *object = rt.memory().raw_pointer(address, spec.size);
+        if (object == nullptr) continue;
+        const std::uint32_t header[6] = {
+            static_cast<std::uint32_t>(frame_present_count), last_pad_buttons,
+            static_cast<std::uint32_t>(last_pad_lx) | (static_cast<std::uint32_t>(last_pad_ly) << 8u),
+            address, spec.vtable, spec.size};
+        std::fwrite(header, sizeof header, 1u, file);
+        std::fwrite(object, 1u, spec.size, file);
+    }
+    if (frame_present_count % 60u == 0u) std::fflush(file);
+}
+
 void object_dump_tick(psprecomp::Runtime &rt) {
     static const struct Config {
         std::uint32_t vtable{}, size{}, every{};
@@ -1799,6 +1864,7 @@ void register_display_hle(psprecomp::Runtime &rt) {
         object_dump_tick(rt);
         player_log_tick(rt);
         player_record_tick(rt);
+        object_record_tick(rt);
         if (vblank_wait_count % 100u == 0u) {
             std::cerr << "[display] wait_vblank count=" << vblank_wait_count
                       << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
