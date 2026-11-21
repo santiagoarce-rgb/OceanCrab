@@ -50,6 +50,7 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_REPORT_DISPATCH_COUNT` | Print the total dispatch count at exit. |
 | `PSPRECOMP_PROFILE_DISPATCH`, `..._START`, `..._COUNT` | Profile a window of dispatches. |
 | `PSPRECOMP_HLE_HISTOGRAM` | Print a histogram of HLE calls by NID. |
+| `PSPRECOMP_MUTEX_DIAG` | Log kernel mutex create/lock/unlock and every blocking lock. |
 | `PSPRECOMP_CHAIN_DEPTH=<n>` | Limit direct chaining between generated units. |
 | `PSPRECOMP_NO_CHAIN` | Disable direct chaining (every call goes through the dispatcher). |
 | `PSPRECOMP_WATCH_WRITE=<addr>`, `PSPRECOMP_WATCH_WRITE_SIZE=<n>` | Report writes to a guest memory range. |
@@ -66,7 +67,9 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 |---|---|
 | `PSPRECOMP_DUMP_FRAME=<dir>` | Write selected presented frames to `<dir>/frame_N.ppm`. |
 | `PSPRECOMP_GE_UNSUPPORTED_DIAG` | Report GE work the renderer drops: primitive types, unsupported texture functions, points/lines that never reach the Vulkan backend. |
-| `PSPRECOMP_GE_TEXTURE_LOG` | Print each distinct texture setup the first time it is drawn: address, format, size, CLUT, texture function, blend state, write masks. |
+| `PSPRECOMP_GE_TEXTURE_LOG` | Print each distinct texture setup the first time it is drawn: address, format, size, CLUT, texture function, UV generation and texture matrix, framebuffer format, alpha/depth test, blend state, write masks. Also reports every textured draw that falls back to the white texture (`WHITE FALLBACK`) and why. |
+| `PSPRECOMP_GE_SKIP_TEXTURE=<addr,...>` | Drop every draw that samples one of these texture addresses. Compare frame dumps to find which texture an on-screen object uses. |
+| `PSPRECOMP_GE_DUMP_TEXTURE=<addr>[,dir]` | Write the decoded RGBA of that texture as `.pam` files (up to 8 uploads). |
 | `PSPRECOMP_DUMP_FRAME_AT=<n,n,...>` | Frame numbers to dump (default `1,40,80,120,160,190,400,800,1200,1600`). |
 | `PSPRECOMP_GE_BACKEND` | Renderer backend (normally taken from the `.ini`). |
 | `PSPRECOMP_INTERNAL_WIDTH`, `PSPRECOMP_INTERNAL_HEIGHT` | Internal render resolution (normally taken from the `.ini`). |
@@ -88,7 +91,7 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 
 | Variable | Effect |
 |---|---|
-| `PSPRECOMP_AUDIO_DIAG`, `PSPRECOMP_SAS_DIAG` | Audio and SAS mixer diagnostics. |
+| `PSPRECOMP_AUDIO_DIAG`, `PSPRECOMP_SAS_DIAG` | Audio and SAS mixer diagnostics. `AUDIO_DIAG` also prints blocks and peak level per `sceAudioOutput2` (movie audio) reservation. |
 | `PSPRECOMP_AUDIO_SUMMARY` | Periodic audio summary. |
 | `PSPRECOMP_AUDIO_PREBUFFER_BLOCKS=<n>` | Blocks to prebuffer before playback. |
 | `PSPRECOMP_AUDIO_WAV=<path>` | Record the audio output to a WAV file. |

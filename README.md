@@ -6,7 +6,7 @@
 The game's MIPS code is translated to C++ ahead of time and compiled for your CPU. No emulator, no JIT.
 
 [![CI](https://github.com/santiagoarce-rgb/OceanCrab/actions/workflows/ci.yml/badge.svg)](https://github.com/santiagoarce-rgb/OceanCrab/actions/workflows/ci.yml)
-![Status](https://img.shields.io/badge/status-main%20menu%20playable-brightgreen)
+![Status](https://img.shields.io/badge/status-completable-brightgreen)
 ![Platform](https://img.shields.io/badge/platform-Linux-informational?logo=linux&logoColor=white)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-00599C?logo=cplusplus&logoColor=white)
 ![Vulkan](https://img.shields.io/badge/graphics-Vulkan-AC162C?logo=vulkan&logoColor=white)
@@ -30,14 +30,14 @@ The long-term goal is a full PC port in the spirit of community projects such as
 ## Status
 
 > [!NOTE]
-> **Completable.** The game boots, plays its Bink videos natively and can be played from New Game to the ending credits. Minigames work too. A few minor texture glitches remain (see below).
+> **Completable.** The game boots, plays its Bink videos natively with sound and can be played from New Game to the ending credits. Minigames work too. Only a few minor texture glitches remain (see below).
 
 | Area | | Notes |
 |---|:---:|---|
 | Boot | ✅ | EBOOT loading and relocation, `module_start`, worker threads |
-| Threading | ✅ | Virtual scheduler with cooperative yield; game threads switch without deadlocks |
-| Rendering | ✅ | GE display lists translated to Vulkan; 2D and 3D |
-| Audio | ✅ | Music and sound effects through `sceAudio` + SAS mixer |
+| Threading | ✅ | Virtual scheduler with cooperative yield, kernel mutexes with timeouts; game threads switch without deadlocks |
+| Rendering | ✅ | GE display lists translated to Vulkan; 2D and 3D, texture-matrix animation (water, lava, skies) and soft alpha blending |
+| Audio | ✅ | Music and sound effects through `sceAudio` + SAS mixer; movie audio through `sceAudioOutput2` |
 | Input | ✅ | Keyboard and gamepads (SDL2) |
 | File I/O | ✅ | `sceIo*` streaming from your extracted `PSP_GAME/USRDIR` |
 | Menus | ✅ | Main menu, Story Mode, Credits, Options |
@@ -144,8 +144,8 @@ Display, rendering and timing options live in [`profiles/spongebob/config/Sponge
 
 | Phase | | Goal |
 |---|:---:|---|
-| Bring-up | ✅ | Boot, scheduler, timers, file I/O, rendering, audio, input, **main menu** |
-| **1 · Correctness** | 🚧 | VFPU translation in the code generator; replace the video and allocation workarounds with real fixes |
+| Bring-up | ✅ | Boot, scheduler, timers, file I/O, rendering, audio, input, **playable start to finish** |
+| **1 · Correctness** | 🚧 | Done: VFPU translation, native Bink video and audio, real heap sizing, no video workarounds. Left: audit the remaining unlowered VFPU sites and fix the last texture glitches |
 | 2 · Understanding | 🔜 | Name functions and structures (player, actors, camera, level loader) and move them to native C++ overrides |
 | 3 · Enhancements | 🔜 | In-game options menu, widescreen, high-resolution rendering, 60 FPS, controller remapping, mod support |
 | 4 · Co-op | 🔭 | Online co-op: sync remote players as in-world puppets, then shared progress |
@@ -165,7 +165,7 @@ docs/                        Architecture, profile guide, configuration referenc
 
 ## Contributing
 
-Contributions are welcome, especially **VFPU translation** in `tools/codegen_main.cpp` and reverse engineering of game structures. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. It covers the commit style, the rule about never committing generated code or game data, and how to propose code generator changes.
+Contributions are welcome, especially **auditing the remaining unlowered VFPU sites** in the generated corpus, fixing the last rendering glitches, and reverse engineering game structures (phase 2). Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. It covers the commit style, the rule about never committing generated code or game data, and how to propose code generator changes.
 
 General-purpose fixes to the framework are intended to go back upstream to PSPRecomp.
 
