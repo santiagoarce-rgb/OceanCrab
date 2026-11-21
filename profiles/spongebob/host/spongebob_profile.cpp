@@ -109,6 +109,12 @@ struct AudioChannelState {
     std::uint64_t queued_frames{};
 };
 std::array<AudioChannelState, 8> audio_channels{};
+// sceAudioOutput2 ("SRC") channel, always stereo s16. Mixed as host channel 8.
+AudioChannelState audio_output2_channel{};
+// PSPRECOMP_AUDIO_DIAG: blocks/peak submitted per Output2 reservation.
+std::uint64_t output2_blocks{};
+std::int32_t output2_peak{};
+constexpr std::uint32_t kOutput2MixerChannel = 8u;
 
 constexpr std::uint32_t kEdramBase = 0x04000000u;  // PSP VRAM base.
 constexpr std::uint32_t kEdramSize = 0x00200000u;  // 2 MB.
@@ -1668,6 +1674,67 @@ void register_audio_hle(psprecomp::Runtime &rt) {
         });
     rt.register_hle("sceAudio", 0xE2D56B2Du,  // sceAudioOutput (non-blocking)
         [output](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) { output(rt, ctx, false); });
+
+    // sceAudioOutput2*: the single stereo 44.1 kHz "SRC" output that Bink's
+    // audio thread plays movie soundtracks through. They used to be generic
+    // return-0 stubs, so movies were silent.
+    rt.register_hle("sceAudio", 0x01562BA3u,  // sceAudioOutput2Reserve(sample_count)
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const std::uint32_t samples = ctx.gpr[4];
+            if (samples < 17u || samples > 4111u) { ctx.set_gpr(2, 0x80260006u); return; }
+            if (audio_output2_channel.reserved) { ctx.set_gpr(2, 0x80268002u); return; }
+            audio_output2_channel = AudioChannelState{};
+            audio_output2_channel.reserved = true;
+            audio_output2_channel.sample_count = samples;
+            audio_output_reset_channel(kOutput2MixerChannel);
+            output2_blocks = 0u;
+            output2_peak = 0;
+            if (std::getenv("PSPRECOMP_AUDIO_DIAG") != nullptr)
+                std::cerr << "[audio] output2 reserve samples=" << samples << " t=" << virtual_time_us << "us\n";
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceAudio", 0x43196845u,  // sceAudioOutput2Release
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            if (!audio_output2_channel.reserved) { ctx.set_gpr(2, 0x80268001u); return; }
+            audio_output2_channel.reserved = false;
+            if (std::getenv("PSPRECOMP_AUDIO_DIAG") != nullptr)
+                std::cerr << "[audio] output2 release: blocks=" << output2_blocks
+                          << " peak=" << output2_peak << " t=" << virtual_time_us << "us\n";
+            ctx.set_gpr(2, 0u);
+        });
+    rt.register_hle("sceAudio", 0x647CEF33u,  // sceAudioOutput2GetRestSample
+        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+            const auto &state = audio_output2_channel;
+            if (!state.reserved) { ctx.set_gpr(2, 0x80268001u); return; }
+            const std::uint64_t left_us =
+                state.busy_until_us > virtual_time_us ? state.busy_until_us - virtual_time_us : 0u;
+            ctx.set_gpr(2, static_cast<std::uint32_t>(left_us * state.frequency / 1000000ull));
+        });
+    rt.register_hle("sceAudio", 0x2D53F36Eu,  // sceAudioOutput2OutputBlocking(volume, buffer)
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+            auto &state = audio_output2_channel;
+            const std::uint32_t volume = ctx.gpr[4];
+            const std::uint32_t buffer = ctx.gpr[5];
+            if (!state.reserved) { ctx.set_gpr(2, 0x80268001u); return; }
+            if (volume > 0xFFFFu) { ctx.set_gpr(2, 0x8026000Bu); return; }
+            const std::size_t bytes = static_cast<std::size_t>(state.sample_count) * 4u;
+            const std::uint8_t *base = buffer != 0u ? rt.memory().raw_pointer(buffer, bytes) : nullptr;
+            if (buffer != 0u && base == nullptr) { ctx.set_gpr(2, 0x800200D3u); return; }
+            state.left_volume = state.right_volume = volume;
+            const std::uint64_t start_us = audio_queue_buffer(state, state.sample_count);
+            if (base != nullptr && audio_output_enabled()) {
+                std::vector<std::int16_t> pcm(bytes / sizeof(std::int16_t));
+                for (std::size_t i = 0u; i < pcm.size(); ++i) {
+                    pcm[i] = static_cast<std::int16_t>(base[i * 2u] | (base[i * 2u + 1u] << 8));
+                    output2_peak = std::max<std::int32_t>(output2_peak, std::abs(static_cast<std::int32_t>(pcm[i])));
+                }
+                ++output2_blocks;
+                audio_output_submit(pcm, state.sample_count, true, volume, volume, state.frequency,
+                                    kOutput2MixerChannel, start_us, virtual_time_us);
+            }
+            const std::uint64_t wait_us = start_us > virtual_time_us ? start_us - virtual_time_us : 0u;
+            suspend_for_wakeup(rt, ctx, virtual_time_us + wait_us);
+        });
 }
 
 void register_display_hle(psprecomp::Runtime &rt) {
