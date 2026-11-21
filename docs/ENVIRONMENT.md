@@ -31,6 +31,8 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_CONFIG=<path>` | Use a different `.ini` file. |
 | `PSPRECOMP_SIMULATE_BUTTON=<mask>` | OR a PSP button bitmask into every pad read (headless testing). |
 | `PSPRECOMP_INPUT_SCRIPT=<first-last=mask,...>` | Hold a button mask during ranges of presented frames, so menus see press/release edges. Example: `1300-1305=0x8,1500-1505=0x4000` (Start, then Cross). |
+| `PSPRECOMP_NO_FRAME_PACING` | Do not sleep to keep the game at real-time speed (fast headless runs). |
+| `PSPRECOMP_PACE_DIAG` | Print the virtual-time / wall-clock speed ratio every 300 VBlank waits. |
 | `PSPRECOMP_GAME_LOG` | Print the engine's own debug messages (`[game] ...`): class names, package loads, load failures. |
 | `PSPRECOMP_MAX_DISPATCHES=<n>` | Stop after `n` dispatches (default 4,000,000,000). |
 | `PSPRECOMP_SPIN_YIELD_TICKS=<n>` | Ticks on the same PC before the scheduler forces a yield (default 4). |
@@ -64,6 +66,7 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | Variable | Effect |
 |---|---|
 | `PSPRECOMP_DUMP_FRAME=<dir>` | Write selected presented frames to `<dir>/frame_N.ppm`. |
+| `PSPRECOMP_GE_UNSUPPORTED_DIAG` | Report GE work the renderer drops: primitive types, unsupported texture functions, points/lines that never reach the Vulkan backend. |
 | `PSPRECOMP_DUMP_FRAME_AT=<n,n,...>` | Frame numbers to dump (default `1,40,80,120,160,190,400,800,1200,1600`). |
 | `PSPRECOMP_GE_BACKEND` | Renderer backend (normally taken from the `.ini`). |
 | `PSPRECOMP_INTERNAL_WIDTH`, `PSPRECOMP_INTERNAL_HEIGHT` | Internal render resolution (normally taken from the `.ini`). |

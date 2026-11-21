@@ -80,7 +80,7 @@ marcarlos así.
   Hub = casa de Bob Esponja.
 - Bugs de render abiertos: los láseres de seguridad del museo (nivel 3) salen sin
   textura (**dificulta avanzar → prioridad**); el agua y los arcoíris se ven raros;
-  falta un modelo de objeto en el nivel 1. El juego corre más rápido que tiempo real.
+  falta un modelo de objeto en el nivel 1. Velocidad: el pacing a reloj real está en `pace_virtual_time_to_wall_clock()`.
 - Heap del motor: `CPSPSystem::InitializeHeap` usa `sceKernelMaxFreeMemSize() - 1 MiB`.
   La memoria libre se calcula de verdad (arena después del módulo, `0x08B70000`,
   hasta los stacks). `[0x08B61000, 0x08B70000)` es scratch del host.
@@ -132,6 +132,9 @@ marcarlos así.
 - `PSPRECOMP_SIMULATE_BUTTON=<mask>` — OR de botones PSP en cada lectura de pad (pruebas headless).
 - `PSPRECOMP_INPUT_SCRIPT=<first-last=mask,...>` — botones por rango de frames (flancos para menús).
   Llegar a gameplay en headless: `1300-1305=0x8,1500-1505=0x4000,1700-1705=0x4000,1900-1905=0x4000,2100-2105=0x4000`.
+- `PSPRECOMP_NO_FRAME_PACING` — sin límite a tiempo real (**usar en pruebas headless**, van ~1.7× más rápido);
+  `PSPRECOMP_PACE_DIAG` — imprime la razón tiempo virtual / reloj real.
+- `PSPRECOMP_GE_UNSUPPORTED_DIAG` — trabajo del GE que el renderer descarta (incluye puntos/líneas que no llegan a Vulkan).
 - `PSPRECOMP_GAME_LOG` — imprime el log de debug del motor (`[game] ...`). **Primer recurso para depurar.**
 - `PSPRECOMP_MAX_DISPATCHES` — tope de dispatches (default 4 000 000 000).
 - `PSPRECOMP_SPIN_YIELD_TICKS` — ticks con el mismo PC antes de forzar yield (default 4).

@@ -415,3 +415,17 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Abierto (por prioridad): láseres de seguridad del museo (nivel 3) sin textura;
   velocidad del juego acelerada; agua y arcoíris raros; un modelo del nivel 1;
   Bink sin canal azul ni audio.
+
+## Sesión 2026-11-21 — velocidad (pacing) y láseres
+
+- Láseres del museo: `PSPRECOMP_GE_UNSUPPORTED_DIAG` no registró sprites 3D
+  descartados. El log del motor muestra `PVS mesh not found: sl03_*.msh` (13
+  mallas que de verdad no están en sl03_bms.pkg; probablemente también pasa en la
+  PSP real). Sospecha viva: puntos/líneas solo pasan por el raster de software y
+  nunca llegan a Vulkan (`gpu_lost_*` en el diag). El usuario lo pospuso; la
+  primera captura se truncó (faltó `grep --line-buffered`).
+- Velocidad: el tiempo virtual salta al siguiente VBlank cuando todo espera y
+  nada lo amarraba al reloj real → 1.71× en menús. `precise_sleep_until` existía
+  pero no se llamaba. Fix: `pace_virtual_time_to_wall_clock()` en cada espera de
+  VBlank, más quitar la doble cuenta de `advance_system_time`. Medido: 1.00× en
+  menús y en el hub (~15 % de margen en headless).
