@@ -896,6 +896,14 @@ int main() {
         require(psprecomp::decode_allegrex(0x7CA8FE04u).kind == psprecomp::OpcodeKind::Ins, "INS decode failed");
         require(psprecomp::decode_allegrex(0x7CA83A00u).kind == psprecomp::OpcodeKind::Ext, "EXT decode failed");
         require(psprecomp::decode_allegrex(0x0000000Fu).kind == psprecomp::OpcodeKind::Sync, "SYNC decode failed");
+        // Allegrex HI/LO accumulate ops: madd/maddu 0x1C/0x1D, msub/msubu 0x2E/0x2F.
+        // 0x0043002E is the msub at ULUS-10478 0x0897AA94 (attack path).
+        require(psprecomp::decode_allegrex(0x0043001Cu).kind == psprecomp::OpcodeKind::Madd, "MADD decode failed");
+        const auto msub = psprecomp::decode_allegrex(0x0043002Eu);
+        require(msub.kind == psprecomp::OpcodeKind::Msub && msub.rs == 2u && msub.rt == 3u, "MSUB decode failed");
+        require(psprecomp::decode_allegrex(0x0043002Fu).kind == psprecomp::OpcodeKind::Msubu, "MSUBU decode failed");
+        require(psprecomp::decode_allegrex(0x0043001Eu).kind == psprecomp::OpcodeKind::Unsupported,
+                "funct 0x1E must not decode as msub on Allegrex");
         const auto vflush = psprecomp::decode_allegrex(0xFFFF0000u);
         require(vflush.kind == psprecomp::OpcodeKind::Vflush && vflush.mnemonic == "vflush",
                 "VFLUSH decode failed");
