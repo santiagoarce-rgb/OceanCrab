@@ -76,27 +76,6 @@ FileTable file_table{};
 // fd -> native path, so the read tracer can flag .bik streaming chunks.
 std::unordered_map<std::int32_t, std::string> file_table_paths;
 
-// Cumulative bytes read per fd (used by the experimental PSPRECOMP_SKIP_BIK hack).
-std::unordered_map<std::int32_t, std::uint64_t> file_table_read_bytes;
-
-// Fake 44-byte Bink header served by sceIoRead when PSPRECOMP_SKIP_BIK=1.
-// "BIKi", 0 frames, 0 audio tracks: the Bink decoder reads it, sees nothing to
-// decode, and reports "Movie complete" immediately — without touching VFPU and
-// without the null-pointer crash that ENOENT-on-open caused.
-constexpr std::array<std::uint8_t, 44u> kFakeBikHeader = {
-    0x42u, 0x49u, 0x4Bu, 0x69u,  // "BIKi"
-    0x2Cu, 0x00u, 0x00u, 0x00u,  // file size = 44
-    0x00u, 0x00u, 0x00u, 0x00u,  // frames = 0 (skip decode; SDK reports "complete")
-    0x00u, 0x00u, 0x00u, 0x00u,  // largest frame = 0
-    0x00u, 0x00u, 0x00u, 0x00u,  // frames (dup) = 0
-    0xE0u, 0x01u, 0x00u, 0x00u,  // width = 480
-    0x10u, 0x01u, 0x00u, 0x00u,  // height = 272
-    0x1Eu, 0x00u, 0x00u, 0x00u,  // fps numerator = 30
-    0x01u, 0x00u, 0x00u, 0x00u,  // fps denominator = 1
-    0x00u, 0x00u, 0x00u, 0x00u,  // flags = 0
-    0x00u, 0x00u, 0x00u, 0x00u,  // audio tracks = 0
-};
-
 // Minimal sceAudio state: one hardware channel per slot (VCS AudioChannelState).
 struct AudioChannelState {
     bool reserved{};
@@ -543,18 +522,8 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                 rt.memory().zero(stat_address, 0x58u);
                 rt.memory().store32(stat_address + 0x00u, (directory ? 0x1000u : 0x2000u) | 0x01FFu);
                 rt.memory().store32(stat_address + 0x04u, directory ? 0x0010u : 0x0020u);
-                static const bool skip_bik = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
-                const bool is_bik = path.size() >= 4u &&
-                    (path.compare(path.size() - 4u, 4u, ".bik") == 0 ||
-                     path.compare(path.size() - 4u, 4u, ".BIK") == 0);
-                std::uint64_t size = regular
+                const std::uint64_t size = regular
                     ? static_cast<std::uint64_t>(std::filesystem::file_size(native, error)) : 0u;
-                if (skip_bik && is_bik) {
-                    // Fake Bink: report st_size = 44 (the synthetic header size)
-                    // so BinkOpen's size check accepts the file.
-                    size = static_cast<std::uint64_t>(kFakeBikHeader.size());
-                    std::cerr << "[io] getstat bik \"" << path << "\" -> size=" << size << "\n";
-                }
                 rt.memory().store32(stat_address + 0x08u, static_cast<std::uint32_t>(size));
                 rt.memory().store32(stat_address + 0x0Cu, static_cast<std::uint32_t>(size >> 32u));
                 ctx.set_gpr(2, 0u);
@@ -574,10 +543,6 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                                (flags & 0x0008u) != 0u;
             if (read) mode |= std::ios::in;
             if (write) mode |= std::ios::out;
-
-            // PSPRECOMP_SKIP_BIK now serves a fake 44-byte "0 frames" Bink header
-            // from sceIoRead instead of refusing the open (which crashed the
-            // Movie system with a null pointer). See kFakeBikHeader.
 
             try {
                 static std::size_t traced = 0u;
@@ -617,27 +582,6 @@ void register_other_stubs(psprecomp::Runtime &rt) {
             std::uint8_t *guest = rt.memory().raw_pointer(dst, size);
             if (guest == nullptr) { ctx.set_gpr(2, 0x80010009u); return; }  // EBADF
 
-            // Fake Bink: serve the 44-byte "0 frames" header, then report EOF.
-            static const bool skip_bik = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
-            if (skip_bik && is_bik) {
-                const std::uint64_t offset = file_table_read_bytes[fd];
-                if (offset < kFakeBikHeader.size()) {
-                    const std::uint64_t remaining = kFakeBikHeader.size() - offset;
-                    const std::uint32_t n = size < remaining ? size
-                        : static_cast<std::uint32_t>(remaining);
-                    for (std::uint32_t i = 0u; i < n; ++i) guest[i] = kFakeBikHeader[offset + i];
-                    file_table_read_bytes[fd] = offset + n;
-                    ctx.set_gpr(2, n);
-                    return;
-                }
-                if (traced < 30u) {
-                    ++traced;
-                    std::cerr << "[io] read fd=" << fd << " [bik fake EOF]\n";
-                }
-                ctx.set_gpr(2, 0u);  // EOF after the fake header
-                return;
-            }
-
             it->second.read(reinterpret_cast<char *>(guest), static_cast<std::streamsize>(size));
             const std::streamsize nread = it->second.gcount();
             const std::uint32_t result = nread >= 0 ? static_cast<std::uint32_t>(nread) : 0u;
@@ -665,32 +609,6 @@ void register_other_stubs(psprecomp::Runtime &rt) {
                 ctx.set_gpr(3, 0xFFFFFFFFu);
                 return;
             }
-            // Fake Bink: seeks stay within the 44-byte synthetic header.
-            const auto path_it = file_table_paths.find(fd);
-            const bool is_bik = path_it != file_table_paths.end() &&
-                path_it->second.size() >= 4u &&
-                (path_it->second.compare(path_it->second.size() - 4u, 4u, ".bik") == 0 ||
-                 path_it->second.compare(path_it->second.size() - 4u, 4u, ".BIK") == 0);
-            static const bool skip_bik = std::getenv("PSPRECOMP_SKIP_BIK") != nullptr;
-            if (skip_bik && is_bik) {
-                std::int64_t base = 0;
-                if (whence == 1) base = static_cast<std::int64_t>(file_table_read_bytes[fd]);
-                else if (whence == 2) base = static_cast<std::int64_t>(kFakeBikHeader.size());
-                else if (whence != 0) { ctx.set_gpr(2, 0x80010016u); ctx.set_gpr(3, 0xFFFFFFFFu); return; }
-                const std::int64_t pos = base + offset;
-                if (pos < 0 || pos > static_cast<std::int64_t>(kFakeBikHeader.size())) {
-                    ctx.set_gpr(2, 0x80010016u);  // EINVAL
-                    ctx.set_gpr(3, 0xFFFFFFFFu);
-                    return;
-                }
-                file_table_read_bytes[fd] = static_cast<std::uint64_t>(pos);
-                std::cerr << "[io] lseek bik fd=" << fd << " offset=" << offset
-                          << " whence=" << whence << " -> " << pos << "\n";
-                ctx.set_gpr(2, static_cast<std::uint32_t>(pos));
-                ctx.set_gpr(3, 0u);
-                return;
-            }
-
             std::ios_base::seekdir direction = std::ios::beg;
             if (whence == 1) direction = std::ios::cur;
             if (whence == 2) direction = std::ios::end;
@@ -812,7 +730,7 @@ struct PartitionTable {
     // User partition arena: starts just past the loaded module and grows up
     // toward the thread stacks. ULUS-10478's image (text+data+bss) ends at
     // 0x08B60DE4; [0x08B61000, 0x08B70000) is reserved for host-owned guest
-    // objects (e.g. the SKIP_BIK fake Movie).
+    // objects (currently unused).
     std::uint32_t next_address{0x08B70000u};
     std::map<std::uint32_t, PartitionBlock> blocks;
 };
@@ -1827,57 +1745,6 @@ void log_main_loop_entries(psprecomp::Runtime &, psprecomp::AllegrexContext &,
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Fake "Movie complete" hook (experimental, gated by PSPRECOMP_SKIP_BIK).
-//
-// The cutscene (movies/mainintro.bik) goes through the Bink SDK, which rejects
-// the synthetic header and returns null, so sub_08943694 (the Movie-manager
-// accessor) dereferences null at 0x08943728. We replace sub_08943694 with a
-// native stub that returns a zero-initialised fake Movie object in guest RAM.
-// That object's field0 points to a fake vtable whose vtable[4] method reports
-// "complete" (returns 0). No effect unless PSPRECOMP_SKIP_BIK is set.
-// ---------------------------------------------------------------------------
-// Host scratch between the module image and the user arena (see PartitionTable).
-constexpr std::uint32_t kFakeMovieObject = 0x08B68000u;   // 256 bytes, zeroed.
-constexpr std::uint32_t kFakeMovieVtable = 0x08B68100u;   // 32 bytes.
-constexpr std::uint32_t kFakeMovieMethod = 0x08B68200u;   // native method addr.
-
-void fake_movie_method(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
-    ctx.set_gpr(2, 0u);  // "complete" / no-op.
-    ctx.pc = ctx.gpr[31];  // host overrides must return explicitly.
-}
-
-void register_movie_skip(psprecomp::Runtime &rt) {
-    if (std::getenv("PSPRECOMP_SKIP_BIK") == nullptr) return;
-
-    rt.memory().zero(kFakeMovieObject, 256u);
-    rt.memory().zero(kFakeMovieVtable, 32u);
-    rt.memory().store32(kFakeMovieObject + 0u, kFakeMovieVtable);   // field0 = vtable.
-    rt.memory().store32(kFakeMovieVtable + 16u, kFakeMovieMethod);  // vtable[4] = method.
-
-    rt.register_function(kFakeMovieMethod, &fake_movie_method, "fake_movie_method");
-    rt.register_function(0x08943694u,
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
-            ctx.set_gpr(2, kFakeMovieObject);
-            ctx.pc = ctx.gpr[31];
-        },
-        "movie_manager_skip");
-
-    std::cerr << "[movie] skip hooked: fake object 0x" << std::hex << kFakeMovieObject
-              << std::dec << "\n";
-}
-
-// ---------------------------------------------------------------------------
-// Fake "menu background missing" skip (gated by PSPRECOMP_SKIP_BIK).
-//
-// The main menu animates a background layer list stored at obj+0x180. That list
-// is populated from disc0:/PSP_GAME/USRDIR/menu_bkg.pvs, a loose UMD file that
-// is absent from the extracted assets (the menu_bkg meshes actually live inside
-// mm.pkg as menu_bkg.mnf + menu_bkg_*.msh, not as menu_bkg.pvs). sceIoGetstat
-// therefore returns ENOENT, the list stays null, and sub_08943060 dereferences
-// null at 0x08943080. Replace the accessor with a stub that returns 0; the
-// callers ignore v0.
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // Engine debug log (opt-in with PSPRECOMP_GAME_LOG=1).
 //
 // The Whiptail engine's debug printf is sub_089C9E34(fmt, ...): it vsprintf's
@@ -1948,19 +1815,6 @@ void register_game_log(psprecomp::Runtime &rt) {
         "game_debug_printf");
 }
 
-void register_menu_bg_skip(psprecomp::Runtime &rt) {
-    if (std::getenv("PSPRECOMP_SKIP_BIK") == nullptr) return;
-
-    rt.register_function(0x08943060u,
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
-            ctx.set_gpr(2, 0u);  // skip the background-layer update entirely.
-            ctx.pc = ctx.gpr[31];
-        },
-        "menu_bg_skip");
-
-    std::cerr << "[menu] skip hooked: sub_08943060 -> 0 (menu_bkg.pvs missing)\n";
-}
-
 void install_spongebob_profile(psprecomp::Runtime &rt) {
     // Registrar module_start como uid 1 (por si acaso).  En el PSP real el
     // module_start es un thread del kernel; aquí no estaba en la tabla, así que
@@ -2010,8 +1864,6 @@ void install_spongebob_profile(psprecomp::Runtime &rt) {
             ctx.set_gpr(2, 0u);
         });
 
-    register_movie_skip(rt);    // Fake Movie object — skips the cutscene (PSPRECOMP_SKIP_BIK).
-    register_menu_bg_skip(rt);  // Fake menu background skip — menu_bkg.pvs is missing.
     register_game_log(rt);      // PSPRECOMP_GAME_LOG: print the engine's debug messages.
 
     // PSP kernel syscall dispatch: a `jal 0x00000000` (the thread-return
