@@ -6,6 +6,7 @@
 #include "ge_renderer.hpp"
 #include "ge_diag.hpp"
 #include "spongebob_frame_limit.hpp"
+#include "spongebob_symbols.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/guest_memory.hpp"
@@ -1809,13 +1810,17 @@ void register_game_log(psprecomp::Runtime &rt) {
     if (std::getenv("PSPRECOMP_GAME_LOG") == nullptr) return;
     rt.register_function(0x089C9E34u,
         [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
-            std::cerr << "[game] " << format_guest_printf(rt, ctx) << "\n";
+            const std::string caller = symbol_for(ctx.gpr[31]);
+            std::cerr << "[game] " << format_guest_printf(rt, ctx);
+            if (!caller.empty()) std::cerr << "  (" << caller << ")";
+            std::cerr << "\n";
             ctx.pc = ctx.gpr[31];
         },
         "game_debug_printf");
 }
 
 void install_spongebob_profile(psprecomp::Runtime &rt) {
+    install_symbols(rt);  // phase-2 names in crash dumps, traces and the game log.
     // Registrar module_start como uid 1 (por si acaso).  En el PSP real el
     // module_start es un thread del kernel; aquí no estaba en la tabla, así que
     // su `jal 0x00000000` no encontraba el uid y hacía un switch sin completar.

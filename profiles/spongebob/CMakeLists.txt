@@ -11,6 +11,8 @@ set(SPONGEBOB_HOST_SOURCES
     host/main.cpp
     host/spongebob_profile.cpp
     host/spongebob_profile.hpp
+    host/spongebob_symbols.cpp
+    host/spongebob_symbols.hpp
     host/ge_gpu_backend_vulkan.cpp
     host/ge_renderer.cpp
     host/display_window_sdl.cpp
@@ -25,6 +27,8 @@ set(SPONGEBOB_HOST_SOURCES
 
 add_executable(SpongeBobNative ${SPONGEBOB_HOST_SOURCES})
 target_include_directories(SpongeBobNative PRIVATE host)
+target_compile_definitions(SpongeBobNative PRIVATE
+    SPONGEBOB_ANALYSIS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/analysis")
 target_link_libraries(SpongeBobNative PRIVATE psprecomp_core)
 
 if(MSVC)
