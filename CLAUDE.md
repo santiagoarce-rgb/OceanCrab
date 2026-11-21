@@ -84,8 +84,8 @@ marcarlos así.
 - Heap del motor: `CPSPSystem::InitializeHeap` usa `sceKernelMaxFreeMemSize() - 1 MiB`.
   La memoria libre se calcula de verdad (arena después del módulo, `0x08B70000`,
   hasta los stacks). `[0x08B61000, 0x08B70000)` es scratch del host.
-- Abierto: los videos Bink no tienen canal azul y no tienen audio (el "Bink audio
-  thread" termina apenas arranca).
+- Bink: colores correctos (blend genérico en Vulkan, `generic_blend()`). Abierto: sin audio
+  (el "Bink audio thread" termina apenas arranca).
 - Bink corre nativo. Aún quedan ~1 950 sitios `vfpu*/cop2 not lowered` en el corpus; no se ejecutan
   en las intros, pero hay que auditarlos (¿código real o datos?).
 - Los hooks de `register_function` **deben** poner `ctx.pc = ctx.gpr[31]` al
@@ -135,6 +135,7 @@ marcarlos así.
 - `PSPRECOMP_NO_FRAME_PACING` — sin límite a tiempo real (**usar en pruebas headless**, van ~1.7× más rápido);
   `PSPRECOMP_PACE_DIAG` — imprime la razón tiempo virtual / reloj real.
 - `PSPRECOMP_GE_UNSUPPORTED_DIAG` — trabajo del GE que el renderer descarta (incluye puntos/líneas que no llegan a Vulkan).
+- `PSPRECOMP_GE_TEXTURE_LOG` — cada textura/estado de blend distinto la primera vez que se dibuja.
 - `PSPRECOMP_GAME_LOG` — imprime el log de debug del motor (`[game] ...`). **Primer recurso para depurar.**
 - `PSPRECOMP_MAX_DISPATCHES` — tope de dispatches (default 4 000 000 000).
 - `PSPRECOMP_SPIN_YIELD_TICKS` — ticks con el mismo PC antes de forzar yield (default 4).

@@ -43,11 +43,10 @@ The long-term goal is a full PC port in the spirit of community projects such as
 | Menus | ✅ | Main menu, Story Mode, Credits, Options |
 | Gameplay | ✅ | Playable start to finish (levels, boss, ending, minigames); rendering bugs listed below |
 | VFPU | 🚧 | Translated by the code generator; the instructions the Bink decoder uses all run. Remaining unlowered sites are being audited |
-| Bink videos | 🚧 | Intro videos decode and play through to the title screen; colors are wrong (luma only) |
+| Bink videos | 🚧 | Decoded natively with correct colors; video audio is still silent |
 
 ### Current investigation
 
-- **Bink colors.** The statically linked Bink decoder runs natively, but video frames have no blue channel (only red/green). The YUV → RGB path, or the video texture format in the GE, is under investigation.
 - **Bink audio.** The decoder's audio thread exits right after it starts, so videos are silent.
 - **Missing textures.** The museum security lasers (level 3) render without textures, which makes that section hard to pass. Water and rainbow textures look wrong, and one object model in the first level does not load.
 

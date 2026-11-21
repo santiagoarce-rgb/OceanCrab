@@ -429,3 +429,18 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   pero no se llamaba. Fix: `pace_virtual_time_to_wall_clock()` en cada espera de
   VBlank, más quitar la doble cuenta de `advance_system_time`. Medido: 1.00× en
   menús y en el hub (~15 % de margen en headless).
+
+## Sesión 2026-11-21 (2) — colores de Bink
+
+- `PSPRECOMP_GE_TEXTURE_LOG` mostró que Bink dibuja Y (480 px) y U/V (240 px) como
+  sprites CLUT8 (`fmt=5`, `tfunc=3`) y hace YUV→RGB en el GE: cada plano de
+  crominancia se dibuja dos veces, con `blend=0x0AA` (FIX/FIX ADD, suma la
+  contribución positiva) y con `0x2AA` (FIX/FIX REVERSE_SUBTRACT, resta la
+  negativa). FIXA = FIXB = blanco.
+- Bug: `blend_variant()` en el backend Vulkan solo conocía 5 combinaciones ADD;
+  todo lo demás → blending apagado (sobrescribe). La pasada de resta pisaba el
+  frame y se perdía el azul.
+- Fix (`f1271c4`): `generic_blend()` mapea las ops (add/sub/rev-sub/min/max) y
+  los factores (FIX → ONE/ZERO/constante) para los estados no cubiertos. Las 5
+  variantes viejas no cambian. Videos y cinemáticas con color correcto; menú y
+  hub sin regresiones. Puede afectar al agua y los arcoíris (pendiente de ver).
