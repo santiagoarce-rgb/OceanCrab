@@ -154,6 +154,13 @@ struct SpongebobConfiguration {
 void initialize_spongebob_render_configuration(const std::filesystem::path &executable_directory);
 
 [[nodiscard]] const SpongebobConfiguration &spongebob_render_configuration();
+
+// Live settings changes (F1 menu). Mutate the in-memory configuration, then
+// persist one key with save_spongebob_setting(), which rewrites only that line
+// of the .ini (creating the file, section or key as needed; comments are kept).
+[[nodiscard]] SpongebobConfiguration &spongebob_render_configuration_mutable();
+bool save_spongebob_setting(const std::string &section, const std::string &key,
+                            const std::string &value);
 [[nodiscard]] const char *display_resolution_mode_name(DisplayResolutionMode mode) noexcept;
 [[nodiscard]] const char *display_aspect_mode_name(DisplayAspectMode mode) noexcept;
 [[nodiscard]] const char *display_upscale_filter_name(DisplayUpscaleFilter filter) noexcept;

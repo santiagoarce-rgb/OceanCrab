@@ -690,6 +690,58 @@ const SpongebobConfiguration &spongebob_render_configuration() {
     return global_configuration();
 }
 
+SpongebobConfiguration &spongebob_render_configuration_mutable() {
+    return global_configuration();
+}
+
+bool save_spongebob_setting(const std::string &section, const std::string &key,
+                            const std::string &value) {
+    std::filesystem::path path = global_configuration().source_path;
+    if (path.empty()) path = global_configuration().executable_directory / "SpongebobNative.ini";
+    std::vector<std::string> lines;
+    {
+        std::ifstream in(path);
+        for (std::string line; std::getline(in, line);) lines.push_back(line);
+    }
+    const std::string wanted_section = lowercase_copy(section);
+    const std::string wanted_key = lowercase_copy(key);
+    bool in_section = false;
+    std::size_t section_end = std::string::npos;  // insertion point for a new key
+    bool written = false;
+    for (std::size_t i = 0u; i < lines.size() && !written; ++i) {
+        const std::string text = trim_copy(lines[i]);
+        if (!text.empty() && text.front() == '[') {
+            const std::size_t close = text.find(']');
+            in_section = close != std::string::npos &&
+                         lowercase_copy(trim_copy(text.substr(1u, close - 1u))) == wanted_section;
+            if (in_section) section_end = i + 1u;
+            continue;
+        }
+        if (!in_section) continue;
+        if (!text.empty() && text.front() != ';' && text.front() != '#') section_end = i + 1u;
+        const std::size_t equals = text.find('=');
+        if (equals == std::string::npos || text.front() == ';' || text.front() == '#') continue;
+        if (lowercase_copy(trim_copy(text.substr(0u, equals))) == wanted_key) {
+            lines[i] = key + "=" + value;
+            written = true;
+        }
+    }
+    if (!written) {
+        if (section_end != std::string::npos) {
+            lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(section_end), key + "=" + value);
+        } else {
+            if (!lines.empty() && !trim_copy(lines.back()).empty()) lines.emplace_back();
+            lines.push_back("[" + section + "]");
+            lines.push_back(key + "=" + value);
+        }
+    }
+    std::ofstream out(path, std::ios::trunc);
+    if (!out) return false;
+    for (const std::string &line : lines) out << line << "\n";
+    global_configuration().source_path = path;
+    return static_cast<bool>(out);
+}
+
 const char *display_resolution_mode_name(DisplayResolutionMode mode) noexcept {
     switch (mode) {
     case DisplayResolutionMode::PspNative: return "PSP";
