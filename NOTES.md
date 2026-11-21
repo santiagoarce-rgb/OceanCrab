@@ -528,6 +528,26 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   `0x088143FC`) en Ghidra con `ImportSymbols.java`, y pasar los nombres al runtime
   (trazas con nombre).
 
+## Sesión 2026-11-21 (7) — 🧽 CSpongeBobEnt (el jugador)
+
+- Método: `PSPRECOMP_OBJECT_DUMP` (vuelca objetos con la vtable `0x08A74978`) +
+  `PSPRECOMP_INPUT_SCRIPT` con stick (`mask@lx:ly`), y diff entre frames quieto
+  vs. caminando. Layout en `host/game/spongebob_player.hpp`.
+- Fábrica `0x08A195A4`: `new(0x928)` + ctor `0x0882A14C` (base `CCharEntBase`
+  ctor `0x0882851C`). El ctor construye `CSpongeBobController` **embebido en
+  +0x470** con back-pointer, `CWMorphController` en +0x7C0, `CEffectHandler` en
+  +0x8EC, y se registra en el **gestor de sesión**: `[[0x08A82488] + 0x124] = this`.
+  El gestor (316 B, sin RTTI) se crea en `0x08805680` y se borra en `0x08804704`.
+- Confirmado en vivo (`PSPRECOMP_PLAYER_LOG`): posición `+0xE8` (fila 3 de la
+  matriz del mundo `+0xB8`), yaw `+0x4C`, velocidad `+0x160` (~4.4 u/s caminando,
+  y = -0.25/-0.51 en el suelo), stick `controller+0x94` (0..1).
+- `sub_08943694` (el viejo hook "Movie manager" de SKIP_BIK) es en realidad
+  `CWAnimated::vfunc_30`.
+- En headless, el jugador aparece hacia el frame presentado ~3000–4900 según la
+  corrida (la cinemática de New Game dura); el control responde poco después.
+- Pendiente: salto (no visto con muestreo de 1 s), estados del personaje,
+  salud/vidas (API Lua `Health`/`Lives`), y la cámara.
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.

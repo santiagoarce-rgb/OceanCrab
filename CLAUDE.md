@@ -132,7 +132,7 @@ que marcarlos así.
 - `PSPRECOMP_AUDIO` — activa salida de audio.
 - `PSPRECOMP_CONFIG` — ruta alternativa al `.ini`.
 - `PSPRECOMP_SIMULATE_BUTTON=<mask>` — OR de botones PSP en cada lectura de pad (pruebas headless).
-- `PSPRECOMP_INPUT_SCRIPT=<first-last=mask,...>` — botones por rango de frames (flancos para menús).
+- `PSPRECOMP_INPUT_SCRIPT=<first-last=mask[@lx:ly],...>` — botones (y stick izquierdo opcional, 128 = centro) por rango de frames presentados.
   Llegar a gameplay en headless: `1300-1305=0x8,1500-1505=0x4000,1700-1705=0x4000,1900-1905=0x4000,2100-2105=0x4000`.
 - `PSPRECOMP_NO_FRAME_PACING` — sin límite a tiempo real (**usar en pruebas headless**, van ~1.7× más rápido);
   `PSPRECOMP_PACE_DIAG` — imprime la razón tiempo virtual / reloj real.
@@ -144,6 +144,8 @@ que marcarlos así.
 - `PSPRECOMP_GAME_LOG` — imprime el log de debug del motor (`[game] ...`). **Primer recurso para depurar.**
   Cada línea termina con la función que la imprimió (símbolos de fase 2).
 - `PSPRECOMP_SYMBOLS=<csv>` — mapa de símbolos para crash dumps/trazas (default `analysis/symbols/symbols.csv`; `0` lo apaga).
+- `PSPRECOMP_OBJECT_DUMP=<vtable>:<size>:<every>[:dir]` — vuelca objetos vivos de una clase (mapear campos).
+- `PSPRECOMP_PLAYER_LOG` — posición/yaw/velocidad del jugador cada segundo. Layout en `host/game/spongebob_player.hpp`.
 - `PSPRECOMP_MAX_DISPATCHES` — tope de dispatches (default 4 000 000 000).
 - `PSPRECOMP_SPIN_YIELD_TICKS` — ticks con el mismo PC antes de forzar yield (default 4).
 

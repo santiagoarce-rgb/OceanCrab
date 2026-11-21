@@ -52,6 +52,8 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_HLE_HISTOGRAM` | Print a histogram of HLE calls by NID. |
 | `PSPRECOMP_MUTEX_DIAG` | Log kernel mutex create/lock/unlock and every blocking lock. |
 | `PSPRECOMP_SYMBOLS=<csv>` | Symbol map used to print names in crash dumps, `PSPRECOMP_TRACE_ON_ERROR` and `PSPRECOMP_GAME_LOG` (default `profiles/spongebob/analysis/symbols/symbols.csv`; `0` disables). |
+| `PSPRECOMP_OBJECT_DUMP=<vtable>:<size>:<every>[:dir]` | Every `<every>` presented frames, write `<size>` bytes of each live object whose first word is `<vtable>` to `<dir>/obj_<addr>_<frame>.bin`. Diff dumps to map class fields. |
+| `PSPRECOMP_PLAYER_LOG` | Once per second, print the player's position, yaw, velocity and stick magnitude (follows the game-session pointer). |
 | `PSPRECOMP_CHAIN_DEPTH=<n>` | Limit direct chaining between generated units. |
 | `PSPRECOMP_NO_CHAIN` | Disable direct chaining (every call goes through the dispatcher). |
 | `PSPRECOMP_WATCH_WRITE=<addr>`, `PSPRECOMP_WATCH_WRITE_SIZE=<n>` | Report writes to a guest memory range. |
