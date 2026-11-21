@@ -556,8 +556,16 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Salud: `controller+0x80` = 4 → 3 en el único golpe recibido (probablemente los
   calzoncillos del HUD). Al entrar al nivel el objeto se reinicializa en la misma
   dirección (no es una muerte).
-- Pendiente: confirmar salud con más golpes / una vida perdida,
-  vidas, enemigos (`CStdEnemyEnt`) y la cámara.
+- 2.ª grabación (2 muertes, 2 vidas ganadas): salud confirmada, 4→3→2→1→0 y
+  vuelve a 4 al reaparecer en el checkpoint; golpes cada ~215 frames
+  (invulnerabilidad ~3.6 s).
+- Vidas/puntos NO están en el jugador: Lua `Lives.AddLives` (`0x088A00F8`) llama
+  `SetLives(G, [G+4]+n)` (`0x0881CFE0`, tope 99) con `G = [0x08A8248C]`; la función
+  vecina `0x0881CFFC` pone `G+8` con tope 999999 (los puntos del HUD). En New Game:
+  vidas 3, puntos 0 (`PSPRECOMP_PLAYER_LOG`).
+- Durante los créditos aparece otro `CSpongeBobEnt` (`0x08DF603C`).
+- Pendiente: confirmar vidas/puntos con una grabación que los incluya, enemigos
+  (`CStdEnemyEnt`) y la cámara.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.

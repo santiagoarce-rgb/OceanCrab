@@ -1702,14 +1702,21 @@ void player_log_tick(psprecomp::Runtime &rt) {
         std::memcpy(&value, &bits, sizeof value);
         return value;
     };
-    char line[200];
+    const std::uint32_t controller = entity + g::player::kController;
+    const std::uint32_t progress = rt.memory().load32(g::kPlayerProgressPtr);
+    char line[256];
     std::snprintf(line, sizeof line,
-                  "[player] frame=%llu ent=0x%08X pos=(%.2f, %.2f, %.2f) yaw=%.2f vel=(%.2f, %.2f, %.2f) stick=%.2f",
+                  "[player] frame=%llu ent=0x%08X pos=(%.2f, %.2f, %.2f) yaw=%.2f vel=(%.2f, %.2f, %.2f) "
+                  "stick=%.2f state=%u health=%u lives=%u score=%u",
                   static_cast<unsigned long long>(frame_present_count), entity,
                   f(g::player::kPosition), f(g::player::kPosition + 4u), f(g::player::kPosition + 8u),
                   f(g::player::kYaw), f(g::player::kVelocity), f(g::player::kVelocity + 4u),
                   f(g::player::kVelocity + 8u),
-                  f(g::player::kController + g::controller::kStickMagnitude));
+                  f(g::player::kController + g::controller::kStickMagnitude),
+                  rt.memory().load32(controller + g::controller::kMoveState),
+                  rt.memory().load32(controller + g::controller::kHealth),
+                  progress != 0u ? rt.memory().load32(progress + g::kProgressLives) : 0u,
+                  progress != 0u ? rt.memory().load32(progress + g::kProgressScore) : 0u);
     std::cerr << line << "\n";
 }
 

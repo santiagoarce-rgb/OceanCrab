@@ -21,6 +21,13 @@ inline constexpr std::uint32_t kGameSessionPtr = 0x08A82488u;  // CGameSession* 
 inline constexpr std::uint32_t kSessionPlayer = 0x124u;       // CSpongeBobEnt*       (confirmed)
 inline constexpr std::uint32_t kSessionEntityLoader = 0x11Cu; // loads .ent effects   (likely)
 
+// Player progress (guest global next to the session; no RTTI). Written by
+// SetLives 0x0881CFE0 (clamps to 99; used by Lua Lives.AddLives 0x088A00F8) and
+// SetScore 0x0881CFFC (clamps to 999999, the 6-digit HUD counter).
+inline constexpr std::uint32_t kPlayerProgressPtr = 0x08A8248Cu;
+inline constexpr std::uint32_t kProgressLives = 0x004u;        // u32, max 99      (likely)
+inline constexpr std::uint32_t kProgressScore = 0x008u;        // u32, max 999999  (likely)
+
 inline constexpr std::uint32_t kSpongeBobEntVtable = 0x08A74978u;
 inline constexpr std::uint32_t kSpongeBobEntSize = 0x928u;
 
