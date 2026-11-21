@@ -913,11 +913,14 @@ bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ct
 // Wake every thread that was blocked in sceKernelWaitThreadEnd on the just-
 // completed thread. These waiters have no wake_at_us deadline, so the idle path
 // never promotes them — this is the only thing that can unblock them.
-void wake_thread_end_waiters(psprecomp::Runtime &rt, std::uint32_t completed_uid) {
+// sceKernelWaitThreadEnd returns the target's exit status in v0.
+void wake_thread_end_waiters(psprecomp::Runtime &rt, std::uint32_t completed_uid,
+                             std::uint32_t exit_status) {
     for (auto &[uid, rec] : thread_table.threads) {
         if (rec.state == ThreadState::Waiting && rec.waiting_on_thread == completed_uid) {
             rec.state = ThreadState::Ready;
             rec.waiting_on_thread = 0u;
+            rec.context.gpr[2] = exit_status;
             thread_table.ready_queue.push_back(uid);
             std::cerr << "[thread] wake uid=" << uid
                       << " (was waiting on " << completed_uid << ")\n";
@@ -940,7 +943,7 @@ void complete_current_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext 
     } else {
         std::cerr << "[thread] WARN: complete for untracked uid=" << thread_table.current_uid << "\n";
     }
-    wake_thread_end_waiters(rt, completed_uid);
+    wake_thread_end_waiters(rt, completed_uid, ctx.gpr[4]);
     (void)activate_next_thread(rt, ctx);
 }
 
@@ -1129,6 +1132,9 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
                 std::cerr << "[thread] delete uid=" << thread_table.current_uid << "\n";
                 thread_table.threads.erase(it);
             }
+            // Deleting must not strand threads blocked in sceKernelWaitThreadEnd
+            // on this one (Bink's per-movie helper thread exits this way).
+            wake_thread_end_waiters(rt, thread_table.current_uid, ctx.gpr[4]);
             (void)activate_next_thread(rt, ctx);
         });
 
