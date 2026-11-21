@@ -55,6 +55,7 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_OBJECT_DUMP=<vtable>:<size>:<every>[:dir]` | Every `<every>` presented frames, write `<size>` bytes of each live object whose first word is `<vtable>` to `<dir>/obj_<addr>_<frame>.bin`. Diff dumps to map class fields. |
 | `PSPRECOMP_PLAYER_RECORD=<file>` | Record, every frame, the pad state plus the whole player object (`tools/symbolize/player_record.py` analyses it). |
 | `PSPRECOMP_OBJECT_RECORD=<file>:<vtable>:<size>[:<vtable>:<size>...]` | Same, for every live object of any classes (e.g. the camera). |
+| `PSPRECOMP_PUPPET_TEST` | Co-op groundwork: the hub townsfolk nearest to the player copies the player's world transform every frame, 30 frames late and 1.5 units to the side. |
 | `PSPRECOMP_PLAYER_LOG` | Once per second, print the player's position, yaw, velocity and stick magnitude (follows the game-session pointer). |
 | `PSPRECOMP_CHAIN_DEPTH=<n>` | Limit direct chaining between generated units. |
 | `PSPRECOMP_NO_CHAIN` | Disable direct chaining (every call goes through the dispatcher). |

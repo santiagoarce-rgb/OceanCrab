@@ -8,6 +8,7 @@
 #include "spongebob_frame_limit.hpp"
 #include "spongebob_symbols.hpp"
 #include "game/spongebob_player.hpp"
+#include "game/spongebob_enemy.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/guest_memory.hpp"
@@ -16,7 +17,9 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
+#include <deque>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1815,6 +1818,77 @@ void object_record_tick(psprecomp::Runtime &rt) {
     if (frame_present_count % 60u == 0u) std::fflush(file);
 }
 
+// PSPRECOMP_PUPPET_TEST=1 — co-op groundwork. Takes one hub townsfolk (a
+// CStdEnemyEnt driven by CDummyControl, i.e. a character with no brain) and,
+// every frame, writes the player's world transform onto it, 30 frames late and
+// 1.5 units to the side (+z). If it follows SpongeBob on screen, a remote player can
+// be shown the same way. Animation is still the NPC's own.
+void puppet_test_tick(psprecomp::Runtime &rt) {
+    static const bool enabled = std::getenv("PSPRECOMP_PUPPET_TEST") != nullptr;
+    if (!enabled) return;
+    namespace g = spongebob::game;
+    auto &mem = rt.memory();
+    const std::uint32_t player = g::find_player(mem);
+    static std::uint32_t puppet = 0u;
+    static std::deque<std::array<std::uint32_t, 16>> history;
+    if (player == 0u) { puppet = 0u; history.clear(); return; }
+    const auto valid_puppet = [&](std::uint32_t ent) {
+        if (ent == 0u || mem.load32(ent) != g::enemy::kEntVtable) return false;
+        const std::uint32_t control = mem.load32(ent + g::enemy::ent::kControl);
+        return control != 0u && mem.raw_pointer(control, 4u) != nullptr &&
+               mem.load32(control) == g::enemy::kDummyControlVtable &&
+               mem.load32(control + g::enemy::control::kEntity) == ent;  // live, linked both ways
+    };
+    if (!valid_puppet(puppet)) {
+        puppet = 0u;
+        if (frame_present_count % 60u != 0u) return;
+        constexpr std::uint32_t kBegin = 0x08B70000u, kEnd = 0x0A000000u;
+        const std::uint8_t *ram = mem.raw_pointer(kBegin, kEnd - kBegin);
+        // Pick the live townsfolk closest to the player (likely on screen).
+        const auto as_f = [](std::uint32_t bits) { float f; std::memcpy(&f, &bits, 4u); return f; };
+        const auto pos = [&](std::uint32_t ent, std::uint32_t i) {
+            return as_f(mem.load32(ent + g::player::kPosition + i * 4u));
+        };
+        float best = 1e30f;
+        for (std::uint32_t off = 0u; ram != nullptr && off + 4u <= kEnd - kBegin; off += 4u) {
+            std::uint32_t word;
+            std::memcpy(&word, ram + off, 4u);
+            if (word != g::enemy::kEntVtable || !valid_puppet(kBegin + off)) continue;
+            float d2 = 0.0f;
+            for (std::uint32_t i = 0u; i < 3u; ++i) {
+                const float d = pos(kBegin + off, i) - pos(player, i);
+                d2 += d * d;
+            }
+            std::cerr << "[puppet] candidate 0x" << std::hex << kBegin + off << std::dec
+                      << " dist=" << std::sqrt(d2) << "\n";
+            if (d2 < best) { best = d2; puppet = kBegin + off; }
+        }
+        if (puppet == 0u) return;
+        std::cerr << "[puppet] using townsfolk 0x" << std::hex << puppet << std::dec
+                  << " (dist " << std::sqrt(best) << ") as puppet\n";
+    }
+    std::array<std::uint32_t, 16> matrix{};
+    for (std::uint32_t i = 0u; i < 16u; ++i) matrix[i] = mem.load32(player + g::player::kWorldMatrix + i * 4u);
+    history.push_back(matrix);
+    if (history.size() < 30u) return;
+    std::array<std::uint32_t, 16> m = history.front();
+    history.pop_front();
+    const auto as_float = [](std::uint32_t bits) { float f; std::memcpy(&f, &bits, 4u); return f; };
+    const auto as_bits = [](float f) { std::uint32_t b; std::memcpy(&b, &f, 4u); return b; };
+    m[14] = as_bits(as_float(m[14]) + 1.5f);  // translation z (row 3): beside, not in front
+    for (std::uint32_t i = 0u; i < 16u; ++i) {
+        mem.store32(puppet + g::player::kWorldMatrix + i * 4u, m[i]);
+        mem.store32(puppet + g::player::kRenderMatrix + i * 4u, m[i]);
+    }
+    for (std::uint32_t i = 0u; i < 3u; ++i) {  // position copy and previous position
+        mem.store32(puppet + g::player::kPositionCopy + i * 4u, m[12u + i]);
+        mem.store32(puppet + g::player::kVelocity + i * 4u, 0u);
+    }
+    if (frame_present_count % 120u == 0u)
+        std::cerr << "[puppet] frame=" << frame_present_count << " puppet at (" << as_float(m[12]) << ", "
+                  << as_float(m[13]) << ", " << as_float(m[14]) << ")\n";
+}
+
 void object_dump_tick(psprecomp::Runtime &rt) {
     static const struct Config {
         std::uint32_t vtable{}, size{}, every{};
@@ -1865,6 +1939,7 @@ void register_display_hle(psprecomp::Runtime &rt) {
         player_log_tick(rt);
         player_record_tick(rt);
         object_record_tick(rt);
+        puppet_test_tick(rt);
         if (vblank_wait_count % 100u == 0u) {
             std::cerr << "[display] wait_vblank count=" << vblank_wait_count
                       << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";

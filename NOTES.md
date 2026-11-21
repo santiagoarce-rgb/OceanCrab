@@ -589,6 +589,21 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   que reaparecen en oleadas (frames 13069, 15841).
 - Pendiente: grabar `CSquidBoss`, vidas/puntos en una grabación, otros enemigos, la IA.
 
+## Sesión 2026-11-21 (8) — 🤝 co-op: investigación y primer puppet
+
+- Referencias (Crests of Courage para Dusklight, Anchor para Ship of Harkinian,
+  sm64coopdx): relay genérico que no conoce el juego (Anchor, JSON por TCP),
+  códigos de sala (Crests), al unirse se carga la partida del host, jugadores
+  remotos como puppets, y enemigos/jefes al final ("Unfinished" en Crests).
+- `PSPRECOMP_PUPPET_TEST`: un NPC del hub (`CStdEnemyEnt` + `CDummyControl`)
+  recibe cada frame la matriz del mundo del jugador (+0xB8 y +0x404, posición
+  +0x54), 30 frames tarde y +1.5 en z. **Se dibuja en esa posición** (frame 7540
+  vs 7442 en headless). El primer NPC elegido no se veía; ahora se toma el más
+  cercano. Ojo: delante del jugador, chocarlo dispara el diálogo del NPC.
+- Siguiente: animación del puppet (frames de anim / modelo de Bob Esponja: crear un
+  segundo `CSpongeBobEnt` con la fábrica `0x08A195A4`), desactivar su colisión y
+  diálogo, y luego red (relay estilo Anchor).
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.
