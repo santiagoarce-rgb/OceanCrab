@@ -1353,13 +1353,27 @@ void register_threadman_hle(psprecomp::Runtime &rt) {
     // sceKernelStartThread — mark Ready and enqueue (the scheduler switches at
     // the next blocking point, e.g. module_start's ExitThread).
     rt.register_hle("ThreadManForUser", 0xF475845Du,
-        [](psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
+        [](psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
             const auto it = thread_table.threads.find(ctx.gpr[4]);
             if (it == thread_table.threads.end()) { ctx.set_gpr(2, 0x80020198u); return; }
             std::cerr << "[thread] start uid=" << ctx.gpr[4] << "\n";
             it->second.state = ThreadState::Ready;
-            it->second.context.gpr[4] = ctx.gpr[5];  // arglen -> thread a0.
-            it->second.context.gpr[5] = ctx.gpr[6];  // argp   -> thread a1.
+            const std::uint32_t arglen = ctx.gpr[5];
+            std::uint32_t argp = ctx.gpr[6];
+            // Like the real kernel, copy the argument block onto the new
+            // thread's stack (below the k0 block) and point a1 at the copy.
+            // The caller may pass a pointer into its own stack frame (Bink's
+            // sound helper does: StartThread(uid, 4, sp)), which is gone by the
+            // time the thread first runs.
+            if (argp != 0u && arglen != 0u && arglen <= 0x1000u) {
+                const std::uint32_t dst = (it->second.kernel_context - arglen) & ~0xFu;
+                for (std::uint32_t i = 0u; i < arglen; ++i)
+                    rt.memory().store8(dst + i, rt.memory().load8(argp + i));
+                argp = dst;
+                it->second.context.gpr[29] = dst;
+            }
+            it->second.context.gpr[4] = arglen;  // arglen -> thread a0.
+            it->second.context.gpr[5] = argp;    // argp   -> thread a1.
             thread_table.ready_queue.push_back(it->second.uid);
             ctx.set_gpr(2, 0u);
         });
