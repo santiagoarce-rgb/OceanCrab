@@ -6,9 +6,13 @@
 // from boot and is the platform view, not the gameplay rig.
 //
 // Mapped with PSPRECOMP_OBJECT_RECORD + tools/symbolize/player_record.py in the
-// hub: the eye orbits the target at a fixed distance (~3.11, eye 0.81 above
-// the target), the target is the player position + 1.3 in y, and L recentres
-// the eye behind the player.
+// hub and level 1: the eye orbits the target at a fixed distance (+0x1D0,
+// ~3.11), the target is the player position + 1.3 in y, and L recentres the
+// eye behind the player. Holding R turns the stick into a free orbit: x spins
+// the azimuth (~4.5 deg/frame at full tilt), y the elevation (clamped near
+// -4.4 deg at the bottom), and the player stops walking (speed 0.20 vs 3.57).
+// No angle is stored: the orbit state is the eye position itself, rotated
+// about the target each frame. Released, the elevation drifts back to ~7 deg.
 
 #include <cstdint>
 
@@ -26,5 +30,6 @@ inline constexpr std::uint32_t kTargetSmoothed = 0x090u; // float x,y,z  (likely
 inline constexpr std::uint32_t kTargetGoal = 0x09Cu;     // float x,y,z  (likely)
 inline constexpr std::uint32_t kEyeCopy = 0x190u;        // float x,y,z  (likely)
 inline constexpr std::uint32_t kTargetCopy = 0x1A8u;     // float x,y,z  (likely)
+inline constexpr std::uint32_t kOrbitDistance = 0x1D0u;  // float ~3.11  (confirmed)
 
 }  // namespace spongebob::game::camera

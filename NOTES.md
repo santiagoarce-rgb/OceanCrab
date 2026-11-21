@@ -570,8 +570,11 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   desde el arranque y es la vista de plataforma). Ojo `+0x08`, objetivo `+0x84` =
   jugador + 1.3 en y, distancia fija ~3.11; L recentra detrás del jugador. Layout en
   `host/game/spongebob_camera.hpp` (`PSPRECOMP_OBJECT_RECORD`).
-- Pendiente: grabar cámara con el usuario moviéndola, vidas/puntos en una grabación,
-  enemigos (`CStdEnemyEnt`).
+- Grabación del usuario (`camara.bin`): R + stick = órbita libre (x azimut
+  ~4.5°/frame, y elevación con tope ~-4.4°; el jugador se detiene: 0.20 vs 3.57 u/s),
+  L recentra. Distancia `+0x1D0`; no hay ángulos guardados: el estado es la propia
+  posición del ojo. El nivel volvió a crear cámara y jugador en direcciones nuevas.
+- Pendiente: vidas/puntos en una grabación, enemigos (`CStdEnemyEnt`).
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
