@@ -703,9 +703,15 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Determinismo verificado: grabación a tiempo real vs reproducción sin pacing →
   posiciones idénticas; ninguna lectura cae en otro frame. Así headless puede llegar
   a cualquier nivel que el usuario haya jugado.
-- Sospecha: las partidas no persisten (Memory Stick falso: el diálogo de guardado
-  "termina" sin escribir). A revisar.
+- ✅ Grabación real del usuario (`hasta_nivel9.bin`, local, sin rastrear: New Game →
+  cheat de niveles → nivel 9) reproducida en headless: llega al mismo punto
+  (confirmado por el usuario). Hubo una deriva de 1 frame en la lectura 453 (menús)
+  sin consecuencias; si alguna grabación se desincroniza, buscar qué depende aún del
+  reloj real.
+- ❗ Confirmado por el usuario: el progreso NO se guarda (Memory Stick falso). Prioridad
+  alta: persistir el savedata en disco.
 
 ## Próxima sesión
+0. **Guardado real** (Memory Stick a disco): hoy no persiste nada.
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.

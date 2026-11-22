@@ -49,7 +49,8 @@ The long-term goal is a full PC port in the spirit of community projects such as
 ### Current investigation
 
 - **Minor texture glitches.** A few townsfolk fish in the hub still have wrong textures.
-- **CPU cost.** Game code (~10 ms) and vertex processing (~5 ms) per frame are the next optimization targets, and they grow with very long draw distances.
+- **Saving.** Progress is not saved yet: the Memory Stick is emulated without writing to disk. This is the next priority.
+- **CPU cost.** Vertex processing (~5 ms per frame) is the next optimization target; it grows with very long draw distances.
 
 ## Enhancements
 
@@ -203,7 +204,7 @@ docs/                        Architecture, profile guide, configuration referenc
 
 ## Contributing
 
-Contributions are welcome, especially **auditing the remaining unlowered VFPU sites** in the generated corpus, CPU performance, the last rendering glitches, and reverse engineering game structures (phase 2). The debugging tools (frame profiler, texture skip/dump, play-session recording) are listed in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md). Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. It covers the commit style, the rule about never committing generated code or game data, and how to propose code generator changes.
+Contributions are welcome, especially **auditing the remaining unlowered VFPU sites** in the generated corpus, CPU performance, the last rendering glitches, and reverse engineering game structures (phase 2). The debugging tools are listed in [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md): frame profiler, texture skip/dump, object recording, and **input record/replay** (the game is deterministic, so a recorded play session replays exactly in a headless run, reaching any level). Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. It covers the commit style, the rule about never committing generated code or game data, and how to propose code generator changes.
 
 General-purpose fixes to the framework are intended to go back upstream to PSPRecomp.
 
