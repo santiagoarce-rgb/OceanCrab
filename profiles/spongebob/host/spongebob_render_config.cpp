@@ -283,8 +283,8 @@ void apply_rendering_key(SpongebobConfiguration &config, const std::string &key,
         return;
     }
     if (key == "drawdistance" || key == "drawdistancescale" || key == "farplanescale") {
-        if (!parse_u32(value, 1u, 16u, config.rendering.draw_distance_scale))
-            warning(config, line, "Rendering.DrawDistance must be between 1 and 16");
+        if (!parse_u32(value, 1u, 64u, config.rendering.draw_distance_scale))
+            warning(config, line, "Rendering.DrawDistance must be between 1 and 64");
         return;
     }
     if (key == "anisotropicfiltering" || key == "anisotropy") {
