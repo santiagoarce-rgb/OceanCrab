@@ -20,10 +20,23 @@ endif()
 option(PSPRECOMP_LTO "Enable link-time/whole-program optimization" OFF)
 option(PSPRECOMP_NATIVE_AVX2 "Use AVX2 code generation for optimized MSVC builds" OFF)
 option(PSPRECOMP_HOST_AVX "Use AVX for host-side scalar floor/ceil hot paths on MSVC" ON)
+# Production fast paths default ON for optimized builds and OFF for Debug, which
+# keeps PSPRECOMP_WATCH_WRITE and the dispatch counters. Measured in the hub at 4x:
+# translated game code 10.2 -> 7.2 ms per frame (with PSPRECOMP_NATIVE_CPU).
+if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+    set(PSPRECOMP_PRODUCTION_DEFAULT ON)
+else()
+    set(PSPRECOMP_PRODUCTION_DEFAULT OFF)
+endif()
 option(PSPRECOMP_AOT_ASSUME_NO_WRITE_WATCH
-    "Remove per-store write-watch branch from production AOT fast memory" OFF)
+    "Remove per-store write-watch branch from production AOT fast memory" ${PSPRECOMP_PRODUCTION_DEFAULT})
 option(PSPRECOMP_AOT_PRODUCTION_FASTPATHS
-    "Compile out AOT chain diagnostic/counter branches for production builds" OFF)
+    "Compile out AOT chain diagnostic/counter branches for production builds" ${PSPRECOMP_PRODUCTION_DEFAULT})
+option(PSPRECOMP_NATIVE_CPU
+    "GCC/Clang: optimize for the build machine's CPU (-march=native); not portable" OFF)
+if(PSPRECOMP_NATIVE_CPU AND NOT MSVC)
+    add_compile_options(-march=native)
+endif()
 
 # Instrument generated jr/jalr to trap null-target calls with a full register
 # dump. Defaults ON for debug builds (diagnostics) and OFF otherwise, so an

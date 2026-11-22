@@ -685,6 +685,17 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   `CWHierarchy` (`player+0x184`). El moon jump sube la posición directamente
   (la velocidad la recalcula la física; el hub no permite saltar y frena el ascenso).
 
+## Sesión 2026-11-21 (13) — ⚡ rendimiento de CPU
+
+- El juego imprimía ~100 líneas por frame (cambios de hilo, GE, framebuffer):
+  ahora solo con `PSPRECOMP_VERBOSE`. Log de headless al hub: 1.1 M → 3 k líneas.
+- Opciones de producción (`ASSUME_NO_WRITE_WATCH`, `PRODUCTION_FASTPATHS`) +
+  `-march=native`: código del juego 10.2 → 7.2 ms/frame (−30 %) en el hub a 4×.
+  Ahora ON por defecto en Release; `-march=native` es `PSPRECOMP_NATIVE_CPU`
+  (OFF por defecto, no portable). Corpus completo: ~12.5 min con 16 hilos.
+- Queda: listas GE (~5.4 ms, casi todo procesamiento de vértices en CPU) y
+  presentar (~2.6 ms a 4×, escalado por software de SDL).
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.

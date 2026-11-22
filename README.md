@@ -127,7 +127,7 @@ profiles/spongebob/original/
 ```bash
 git clone https://github.com/santiagoarce-rgb/OceanCrab.git
 cd OceanCrab
-cmake -S . -B out/crab -G Ninja -DCMAKE_BUILD_TYPE=Release -DPSPRECOMP_PROFILE=spongebob
+cmake -S . -B out/crab -G Ninja -DCMAKE_BUILD_TYPE=Release -DPSPRECOMP_PROFILE=spongebob -DPSPRECOMP_NATIVE_CPU=ON
 cmake --build out/crab -j"$(nproc)"
 ```
 
@@ -146,7 +146,7 @@ The corpus is about 56 MB of C++ in 20 units. It is derived from your game binar
 cmake --build out/crab -j"$(nproc)"
 ```
 
-The first build of the generated units takes a while.
+The first build of the generated units takes a while (about 12 minutes on a 16-thread laptop CPU). `PSPRECOMP_NATIVE_CPU=ON` tunes the build for your CPU; leave it off if you want to share the binary.
 
 ### 5. Play
 

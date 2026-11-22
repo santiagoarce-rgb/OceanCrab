@@ -26,7 +26,7 @@ C++ antes de compilar; un runtime propio emula el SO/hardware de la PSP (HLE).
 ## Compilar
 
 ```bash
-cmake -S . -B out/crab -DPSPRECOMP_PROFILE=spongebob -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B out/crab -DPSPRECOMP_PROFILE=spongebob -G Ninja -DCMAKE_BUILD_TYPE=Release -DPSPRECOMP_NATIVE_CPU=ON
 cmake --build out/crab -j$(nproc)
 ```
 
@@ -123,7 +123,9 @@ que marcarlos así.
 | `PSPRECOMP_NULL_JUMP_CHECK` | Atrapa `jr`/`jalr` a 0 en código generado (ON por defecto en Debug) |
 | `PSPRECOMP_GENERATED_OPT_LEVEL` | Nivel `-O` de las units generadas (0–3, default 2) |
 | `PSPRECOMP_BUILD_TESTS` / `PSPRECOMP_BUILD_PROFILE_TESTS` | Tests del framework / del perfil |
-| `PSPRECOMP_LTO`, `PSPRECOMP_AOT_ASSUME_NO_WRITE_WATCH`, `PSPRECOMP_AOT_PRODUCTION_FASTPATHS` | Optimizaciones de producción |
+| `PSPRECOMP_AOT_ASSUME_NO_WRITE_WATCH`, `PSPRECOMP_AOT_PRODUCTION_FASTPATHS` | Producción: ON por defecto en Release (−30 % de tiempo del juego), OFF en Debug (conserva `WATCH_WRITE` y contadores) |
+| `PSPRECOMP_NATIVE_CPU` | `-march=native` (no portable; usar en builds locales) |
+| `PSPRECOMP_LTO` | LTO (no probado: el corpus es enorme) |
 | `PSPRECOMP_NATIVE_AVX2`, `PSPRECOMP_HOST_AVX`, `PSPRECOMP_MSVC_*` | Solo MSVC/Windows |
 
 ### Variables de entorno (runtime)
