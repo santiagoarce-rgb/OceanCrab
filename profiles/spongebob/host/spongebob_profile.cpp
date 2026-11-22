@@ -192,6 +192,14 @@ void frame_profile_tick() {
     frame_profile.window_start = now;
 }
 
+// PSPRECOMP_VERBOSE=1: per-frame / per-thread-switch trace lines. Off by default:
+// ~100 lines per frame to a terminal cost real CPU (unbuffered writes plus the
+// terminal rendering them).
+bool verbose_log() {
+    static const bool enabled = std::getenv("PSPRECOMP_VERBOSE") != nullptr;
+    return enabled;
+}
+
 // Last perspective projection used by a 3D draw (PSPRECOMP_PLAYER_LOG).
 std::array<float, 16> last_perspective_projection{};
 
@@ -467,8 +475,9 @@ void ge_list_enqueue(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
     const std::uint32_t stall_address = ctx.gpr[5];
     const std::uint32_t callback_id = ctx.gpr[6];
     ++ge_enqueue_count;
-    std::cerr << "[ge] enqueue list=" << psprecomp::hex32(list_address)
-              << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+    if (verbose_log())
+        std::cerr << "[ge] enqueue list=" << psprecomp::hex32(list_address)
+                  << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
     GeListRecord record{};
     record.guest_id = ge_list_table.next_raw_id++;
     record.list_address = list_address;
@@ -489,9 +498,10 @@ void ge_list_enqueue(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
 void ge_list_sync(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
     const std::uint32_t list_id = ctx.gpr[4];
     ++ge_list_sync_count;
-    std::cerr << "[ge] sync list=" << psprecomp::hex32(list_id)
-              << " count=" << ge_list_sync_count
-              << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+    if (verbose_log())
+        std::cerr << "[ge] sync list=" << psprecomp::hex32(list_id)
+                  << " count=" << ge_list_sync_count
+                  << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
     const auto it = ge_list_table.lists.find(list_id);
     if (it != ge_list_table.lists.end()) it->second.state = GeListState::Completed;
     ctx.set_gpr(2, 0u);
@@ -499,8 +509,9 @@ void ge_list_sync(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
 
 void ge_draw_sync(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
     ++ge_draw_sync_count;
-    std::cerr << "[ge] draw_sync count=" << ge_draw_sync_count
-              << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
+    if (verbose_log())
+        std::cerr << "[ge] draw_sync count=" << ge_draw_sync_count
+                  << " pc=" << psprecomp::hex32(ctx.gpr[31]) << "\n";
     ctx.set_gpr(2, 0u);
 }
 
@@ -1164,10 +1175,12 @@ bool activate_next_thread(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ct
         thread_table.current_uid = uid;
         ctx = record.context;
         psprecomp::set_runtime_thread_identity(static_cast<std::int32_t>(uid), record.name);
-        std::cerr << "[thread] switch to uid=" << uid
-                  << " state=" << thread_state_name(record.state) << "\n";
-        std::cerr << "[thread] now running uid=" << thread_table.current_uid
-                  << " pc=" << psprecomp::hex32(ctx.pc) << "\n";
+        if (verbose_log()) {
+            std::cerr << "[thread] switch to uid=" << uid
+                      << " state=" << thread_state_name(record.state) << "\n";
+            std::cerr << "[thread] now running uid=" << thread_table.current_uid
+                      << " pc=" << psprecomp::hex32(ctx.pc) << "\n";
+        }
         return true;
     }
     dump_thread_state();
@@ -2310,9 +2323,10 @@ void register_display_hle(psprecomp::Runtime &rt) {
                 has_last_frame_buffer = true;
             }
             ge_gpu_backend_set_display_framebuffer(framebuf, display_state.width, display_state.height);
-            std::cerr << "[display] framebuf=" << psprecomp::hex32(framebuf)
-                      << " width=" << ctx.gpr[5]
-                      << " height=" << display_state.height << "\n";
+            if (verbose_log())
+                std::cerr << "[display] framebuf=" << psprecomp::hex32(framebuf)
+                          << " width=" << ctx.gpr[5]
+                          << " height=" << display_state.height << "\n";
             ctx.set_gpr(2, 0u);
         });
     rt.register_hle("sceDisplay", 0xEEDA2E54u,  // sceDisplayGetFrameBuf

@@ -135,6 +135,7 @@ que marcarlos así.
 - `PSPRECOMP_INPUT_SCRIPT=<first-last=mask[@lx:ly],...>` — botones (y stick izquierdo opcional, 128 = centro) por rango de frames presentados.
   Llegar a gameplay en headless (saltando las cinemáticas de New Game con X; el hub aparece hacia el frame ~2340 en vez de ~7400):
   `1300-1305=0x8,1500-1505=0x4000,1700-1705=0x4000,1900-1905=0x4000,2100-2105=0x4000,2300-2305=0x4000,2500-2505=0x4000,2700-2705=0x4000,2900-2905=0x4000,3100-3105=0x4000`.
+- `PSPRECOMP_VERBOSE` — trazas por frame/cambio de hilo (`[thread] switch`, `[ge] enqueue`…), apagadas por defecto (~100 líneas/frame).
 - `PSPRECOMP_FRAME_PROFILE` — ms por frame: juego / listas GE / Vulkan+copia / presentar / sueño del pacing (+ comandos GE). Con `PSPRECOMP_GE_PHASE_DIAG` desglosa las listas GE. **Primer recurso para rendimiento** (no hay `perf` instalado).
 - `PSPRECOMP_GE_LIST_DIAG` — histograma de opcodes GE, END que enlazan, FINISH+END y flujo de control de una lista.
 - `PSPRECOMP_NO_FRAME_PACING` — sin límite a tiempo real (**usar en pruebas headless**, van ~1.7× más rápido);
