@@ -140,6 +140,9 @@ que marcarlos así.
 - `PSPRECOMP_VERBOSE` — trazas por frame/cambio de hilo (`[thread] switch`, `[ge] enqueue`…), apagadas por defecto (~100 líneas/frame).
 - `PSPRECOMP_FRAME_PROFILE` — ms por frame: juego / listas GE / Vulkan+copia / presentar / sueño del pacing (+ comandos GE). Con `PSPRECOMP_GE_PHASE_DIAG` desglosa las listas GE. **Primer recurso para rendimiento** (no hay `perf` instalado).
 - `PSPRECOMP_GE_LIST_DIAG` — histograma de opcodes GE, END que enlazan, FINISH+END y flujo de control de una lista.
+- `PSPRECOMP_INPUT_RECORD=<file>` / `PSPRECOMP_INPUT_REPLAY=<file>` — graba cada lectura del control en una partida real y la
+  reproduce en headless. **El juego es determinista** (verificado: grabación con pacing = reproducción sin pacing, posiciones
+  idénticas). Pedirle al usuario grabaciones hasta niveles concretos para probar ahí en headless.
 - `PSPRECOMP_NO_FRAME_PACING` — sin límite a tiempo real (**usar en pruebas headless**, van ~1.7× más rápido);
   `PSPRECOMP_PACE_DIAG` — imprime la razón tiempo virtual / reloj real.
 - `PSPRECOMP_GE_UNSUPPORTED_DIAG` — trabajo del GE que el renderer descarta (incluye puntos/líneas que no llegan a Vulkan).

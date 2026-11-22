@@ -696,6 +696,16 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
 - Queda: listas GE (~5.4 ms, casi todo procesamiento de vértices en CPU) y
   presentar (~2.6 ms a 4×, escalado por software de SDL).
 
+## Sesión 2026-11-21 (14) — 🎬 grabar y reproducir partidas
+
+- `PSPRECOMP_INPUT_RECORD`/`PSPRECOMP_INPUT_REPLAY`: se graba cada lectura del
+  control (índice, frame, botones, stick) y se reinyecta lectura a lectura.
+- Determinismo verificado: grabación a tiempo real vs reproducción sin pacing →
+  posiciones idénticas; ninguna lectura cae en otro frame. Así headless puede llegar
+  a cualquier nivel que el usuario haya jugado.
+- Sospecha: las partidas no persisten (Memory Stick falso: el diálogo de guardado
+  "termina" sin escribir). A revisar.
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.

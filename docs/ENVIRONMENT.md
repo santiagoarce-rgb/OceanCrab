@@ -60,6 +60,8 @@ Boolean environment variables are enabled by being set to any value (`=1`).
 | `PSPRECOMP_OBJECT_RECORD=<file>:<vtable>:<size>[:<vtable>:<size>...]` | Same, for every live object of any classes (e.g. the camera). |
 | `PSPRECOMP_MENU_OPEN=1\|graphics` | Start with the F1 menu open (`graphics` also shows the Graphics panel as a window). For headless screenshots. |
 | `PSPRECOMP_WINDOW_SHOT=<file.bmp>` | Save the composed window (game + menu) at the 600th presented frame. |
+| `PSPRECOMP_INPUT_RECORD=<file>` | Record every pad read the game makes (play normally). |
+| `PSPRECOMP_INPUT_REPLAY=<file>` | Feed a recording back read for read (headless). The game is deterministic for the same input (virtual time), so a session to any level replays exactly; a drift warning is printed if not. |
 | `PSPRECOMP_CHEAT_TEST` | Headless check of the cheats: save position at frame 2500, load at 2800, moon jump during 2900-2950. |
 | `PSPRECOMP_PUPPET_TEST` | Co-op groundwork: the hub townsfolk nearest to the player copies the player's world transform every frame, 30 frames late and 1.5 units to the side. |
 | `PSPRECOMP_PLAYER_LOG` | Once per second, print the player's position, yaw, velocity and stick magnitude (follows the game-session pointer). |

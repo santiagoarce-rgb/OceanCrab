@@ -697,6 +697,60 @@ void register_other_stubs(psprecomp::Runtime &rt) {
             rt.memory().store8(sample + 11u, 128u);           // ry
             rt.memory().zero(sample + 12u, 4u);               // Rsrv
         }
+        // PSPRECOMP_INPUT_RECORD=<file> / PSPRECOMP_INPUT_REPLAY=<file>: record every
+        // pad read the game makes (live play), and feed it back read for read in a
+        // later run (headless), so a play session to any level can be reproduced.
+        // Records are {u32 read index, u32 frame, u32 buttons, u8 lx, u8 ly, u16 0}.
+        // Virtual time makes the game deterministic for the same input; replay
+        // checks the frame of each read and warns once if it drifts.
+        {
+            static std::uint64_t read_index = 0u;
+            struct PadRecord { std::uint32_t index, frame, buttons; std::uint8_t lx, ly; std::uint16_t pad; };
+            static std::FILE *record = [] {
+                const char *path = std::getenv("PSPRECOMP_INPUT_RECORD");
+                std::FILE *f = path != nullptr ? std::fopen(path, "wb") : nullptr;
+                if (f != nullptr) std::cerr << "[input] recording pad reads to " << path << "\n";
+                return f;
+            }();
+            static std::vector<PadRecord> replay = [] {
+                std::vector<PadRecord> list;
+                const char *path = std::getenv("PSPRECOMP_INPUT_REPLAY");
+                if (std::FILE *f = path != nullptr ? std::fopen(path, "rb") : nullptr) {
+                    PadRecord r{};
+                    while (std::fread(&r, sizeof r, 1u, f) == 1u) list.push_back(r);
+                    std::fclose(f);
+                    std::cerr << "[input] replaying " << list.size() << " pad reads from " << path << "\n";
+                }
+                return list;
+            }();
+            if (read_index < replay.size()) {
+                const PadRecord &r = replay[read_index];
+                static bool warned = false;
+                if (!warned && r.frame != static_cast<std::uint32_t>(frame_present_count)) {
+                    warned = true;
+                    std::cerr << "[input] WARNING replay drift at read " << read_index << ": recorded frame "
+                              << r.frame << ", now " << frame_present_count << "\n";
+                }
+                buttons = r.buttons;
+                analog_x = r.lx;
+                analog_y = r.ly;
+                if (read_index + 1u == replay.size())
+                    std::cerr << "[input] replay finished at frame " << frame_present_count << "\n";
+                for (std::uint32_t i = 0u; i < count; ++i) {
+                    const std::uint32_t sample = destination + i * kSampleSize;
+                    rt.memory().store32(sample + 4u, buttons);
+                    rt.memory().store8(sample + 8u, analog_x);
+                    rt.memory().store8(sample + 9u, analog_y);
+                }
+            }
+            if (record != nullptr) {
+                const PadRecord r{static_cast<std::uint32_t>(read_index), static_cast<std::uint32_t>(frame_present_count),
+                                  buttons, analog_x, analog_y, 0u};
+                std::fwrite(&r, sizeof r, 1u, record);
+                std::fflush(record);  // 1-2 reads per frame; nothing lost on Ctrl+C or a crash
+            }
+            ++read_index;
+        }
         last_pad_buttons = buttons;
         last_pad_lx = analog_x;
         last_pad_ly = analog_y;
