@@ -186,6 +186,10 @@ guarda en `SpongebobNative.ini` junto al ejecutable (`save_spongebob_setting`). 
 .ini que el juego lee; `config/SpongeBobNative.ini` del repo NO se carga salvo con `PSPRECOMP_CONFIG`.
 - `PSPRECOMP_MENU_OPEN=1|graphics`, `PSPRECOMP_WINDOW_SHOT=<bmp>` — probar el menú en headless.
 
+**Cheats** (`host/spongebob_cheats.hpp`, aplicados en `cheats_tick`): salud/vidas infinitas, moon jump (J),
+turbo (Tab, sin pacing), guardar/cargar posición (F5/F7). La posición autoritativa está en el
+`CSPRigidBody` (`player+0x138`), no solo en la matriz del jugador. `PSPRECOMP_CHEAT_TEST=1` los prueba en headless.
+
 **Host (`SPONGEBOB_*`)**: `SPONGEBOB_WINDOW_SCALE`, `SPONGEBOB_VULKAN_VALIDATION`,
 `SPONGEBOB_HUD_DIAG`, `SPONGEBOB_GE_NO_DEFER`.
 

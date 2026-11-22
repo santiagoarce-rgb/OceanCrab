@@ -10,6 +10,7 @@
 #include "spongebob_render_config.hpp"
 #include "game/spongebob_player.hpp"
 #include "game/spongebob_enemy.hpp"
+#include "spongebob_cheats.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/guest_memory.hpp"
@@ -1013,6 +1014,8 @@ void pace_virtual_time_to_wall_clock() {
     if (disabled) {
         // keep the anchor current so enabling later would not stall.
         offset_us = virt - wall;
+    } else if (cheats().turbo_enabled && cheats().turbo_held) {
+        offset_us = virt - wall;  // turbo: run unpaced, re-anchor so release is smooth
     } else if (ahead > 0) {
         ProfileScope scope(frame_profile.sleep_ns);
         precise_sleep_until(std::chrono::steady_clock::now() + std::chrono::microseconds(ahead));
@@ -2142,6 +2145,81 @@ void entity_draw_distance_tick(psprecomp::Runtime &rt) {
     }
 }
 
+// Cheats (F1 > Cheats, hotkeys J / Tab / F5 / F7), applied once per frame to
+// the live player found through the game session (game/spongebob_player.hpp).
+void cheats_tick(psprecomp::Runtime &rt) {
+    namespace g = spongebob::game;
+    CheatState &c = cheats();
+    auto &mem = rt.memory();
+    const std::uint32_t player = g::find_player(mem);
+    if (player == 0u) {
+        c.save_position_request = false;
+        c.load_position_request = false;
+        return;
+    }
+    // PSPRECOMP_CHEAT_TEST=1: scripted check for headless runs (save at frame 2500,
+    // load at 2800, moon jump during 2900-2950).
+    static const bool scripted = std::getenv("PSPRECOMP_CHEAT_TEST") != nullptr;
+    if (scripted) {
+        if (frame_present_count == 2500u) c.save_position_request = true;
+        if (frame_present_count == 2800u) c.load_position_request = true;
+        c.moon_jump_held = frame_present_count >= 2900u && frame_present_count <= 2950u;
+    }
+    const std::uint32_t controller = player + g::player::kController;
+    if (c.infinite_health) mem.store32(controller + g::controller::kHealth, 4u);
+    if (c.infinite_lives) {
+        if (const std::uint32_t progress = mem.load32(g::kPlayerProgressPtr); progress != 0u &&
+            mem.load32(progress + g::kProgressLives) < 9u)
+            mem.store32(progress + g::kProgressLives, 9u);
+    }
+    // Writes a position to every copy the engine keeps (entity matrices, position
+    // copies, physics body), so physics does not snap it back.
+    const auto set_position = [&](const std::array<std::uint32_t, 3> &xyz) {
+        for (std::uint32_t i = 0u; i < 3u; ++i) {
+            mem.store32(player + g::player::kWorldMatrix + (12u + i) * 4u, xyz[i]);
+            mem.store32(player + g::player::kRenderMatrix + (12u + i) * 4u, xyz[i]);
+            mem.store32(player + g::player::kPositionCopy + i * 4u, xyz[i]);
+            mem.store32(player + g::player::kPreviousPosition + i * 4u, xyz[i]);
+        }
+        if (const std::uint32_t body = mem.load32(player + g::player::kRigidBody);
+            body != 0u && mem.raw_pointer(body, 0x200u) != nullptr)
+            for (const std::uint32_t copy : g::rigid_body::kPositionCopies)
+                for (std::uint32_t i = 0u; i < 3u; ++i) mem.store32(body + copy + i * 4u, xyz[i]);
+    };
+    const auto f32 = [](std::uint32_t bits) { float f; std::memcpy(&f, &bits, 4u); return f; };
+    const auto bits32 = [](float f) { std::uint32_t b; std::memcpy(&b, &f, 4u); return b; };
+    // Moon jump: lift the position directly (velocity is recomputed by physics,
+    // and some areas such as the hub do not allow jumping at all).
+    if (c.moon_jump_enabled && c.moon_jump_held) {
+        std::array<std::uint32_t, 3> xyz{};
+        for (std::uint32_t i = 0u; i < 3u; ++i) xyz[i] = mem.load32(player + g::player::kPosition + i * 4u);
+        xyz[1] = bits32(f32(xyz[1]) + 0.12f);  // ~7 units/s at 60 fps
+        set_position(xyz);
+        mem.store32(player + g::player::kVelocity + 4u, 0u);
+    }
+    // Save / load position (and facing).
+    static std::array<std::uint32_t, 16> saved_matrix{};
+    static std::uint32_t saved_yaw = 0u;
+    if (c.save_position_request.exchange(false)) {
+        for (std::uint32_t i = 0u; i < 16u; ++i) saved_matrix[i] = mem.load32(player + g::player::kWorldMatrix + i * 4u);
+        saved_yaw = mem.load32(player + g::player::kYaw);
+        c.position_saved = true;
+        std::cerr << "[cheats] position saved\n";
+    }
+    if (c.load_position_request.exchange(false) && c.position_saved) {
+        for (std::uint32_t i = 0u; i < 12u; ++i) {
+            mem.store32(player + g::player::kWorldMatrix + i * 4u, saved_matrix[i]);
+            mem.store32(player + g::player::kRenderMatrix + i * 4u, saved_matrix[i]);
+        }
+        set_position({saved_matrix[12], saved_matrix[13], saved_matrix[14]});
+        for (std::uint32_t i = 0u; i < 3u; ++i) mem.store32(player + g::player::kVelocity + i * 4u, 0u);
+        mem.store32(player + g::player::kYaw, saved_yaw);
+        mem.store32(controller + g::controller::kYaw, saved_yaw);
+        mem.store32(controller + g::controller::kWantedYaw, saved_yaw);
+        std::cerr << "[cheats] position loaded\n";
+    }
+}
+
 void object_dump_tick(psprecomp::Runtime &rt) {
     static const struct Config {
         std::uint32_t vtable{}, size{}, every{};
@@ -2189,6 +2267,7 @@ void register_display_hle(psprecomp::Runtime &rt) {
             return;
         }
         object_dump_tick(rt);
+        cheats_tick(rt);
         entity_draw_distance_tick(rt);
         player_log_tick(rt);
         player_record_tick(rt);

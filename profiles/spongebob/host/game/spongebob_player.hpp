@@ -11,6 +11,7 @@
 
 #include "psprecomp/guest_memory.hpp"
 
+#include <array>
 #include <cstdint>
 
 namespace spongebob::game {
@@ -38,6 +39,7 @@ inline constexpr std::uint32_t kPositionCopy = 0x054u;     // float x,y,z       
 inline constexpr std::uint32_t kWorldMatrix = 0x0B8u;      // float[16], row-major 4x4 (confirmed)
 inline constexpr std::uint32_t kPosition = 0x0E8u;         // float x,y,z = matrix row 3 (confirmed)
 inline constexpr std::uint32_t kVelocity = 0x160u;         // float x,y,z units/s    (confirmed)
+inline constexpr std::uint32_t kRigidBody = 0x138u;        // CSPRigidBody* (physics; authoritative position)
 inline constexpr std::uint32_t kAnimTime = 0x1BCu;         // float seconds          (likely)
 inline constexpr std::uint32_t kAnimFrame = 0x1E0u;        // u32 current, +4 next   (likely)
 inline constexpr std::uint32_t kRenderMatrix = 0x404u;     // float[16] copy         (likely)
@@ -50,6 +52,12 @@ inline constexpr std::uint32_t kAttackBlend = 0x7D4u;      // float 0->1 during 
 inline constexpr std::uint32_t kPreviousPosition = 0x764u; // float x,y,z, one frame behind (likely)
 inline constexpr std::uint32_t kEffects = 0x8ECu;          // embedded CEffectHandler
 }  // namespace player
+
+// CSPRigidBody (-> CWRigidBody): the physics body. Writing only the entity's
+// matrix is undone next frame; these hold copies of the position (x,y,z).
+namespace rigid_body {
+inline constexpr std::array<std::uint32_t, 4> kPositionCopies = {0x014u, 0x02Cu, 0x110u, 0x19Cu};  // likely
+}  // namespace rigid_body
 
 // CSpongeBobController (ctor 0x08854E44), offsets relative to the controller.
 // States, flags and combo were mapped from a recorded play session

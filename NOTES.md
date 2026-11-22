@@ -672,6 +672,19 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   `entity_draw_distance_tick` las mantiene en base × DrawDistance (re-toma la base
   si el juego escribe otro valor). Menú hasta 64×.
 
+## Sesión 2026-11-21 (12) — 🎮 cheats para testear
+
+- Referencias: SoH (salud/munición infinitas, no clip, moon jump, map select,
+  editor de partida, visor de actores) y Dusklight (cámara libre, saltos altos).
+- Menú F1 → Cheats: salud infinita (`controller+0x80`=4), vidas infinitas
+  (progreso+4 ≥ 9), moon jump (J), turbo (Tab: el pacing se re-ancla en vez de
+  dormir), guardar/cargar posición (F5/F7).
+- Escribir solo la matriz del jugador no basta: la física lo devuelve. La posición
+  autoritativa está en el `CSPRigidBody` en `player+0x138` (copias en +0x14, +0x2C,
+  +0x110, +0x19C). También hay copias en `CCharShadow` (`player+0x918`) y
+  `CWHierarchy` (`player+0x184`). El moon jump sube la posición directamente
+  (la velocidad la recalcula la física; el hub no permite saltar y frena el ascenso).
+
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
 2. Fase 2: simbolización con ayuda de `PSPRECOMP_GAME_LOG`.

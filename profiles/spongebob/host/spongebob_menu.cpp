@@ -2,6 +2,7 @@
 
 #include "spongebob_render_config.hpp"
 #include "ge_gpu_backend.hpp"
+#include "spongebob_cheats.hpp"
 
 #include <SDL.h>
 #include <imgui.h>
@@ -143,6 +144,25 @@ void graphics_menu() {
     }
 }
 
+void cheats_menu() {
+    CheatState &c = cheats();
+    const auto toggle = [](const char *label, std::atomic<bool> &flag) {
+        bool value = flag.load();
+        if (ImGui::Checkbox(label, &value)) flag.store(value);
+    };
+    ImGui::SeparatorText("Player");
+    toggle("Infinite health", c.infinite_health);
+    toggle("Infinite lives", c.infinite_lives);
+    toggle("Moon jump (hold J)", c.moon_jump_enabled);
+    ImGui::SeparatorText("Testing");
+    toggle("Turbo (hold Tab)", c.turbo_enabled);
+    if (ImGui::Button("Save position (F5)")) c.save_position_request = true;
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!c.position_saved.load());
+    if (ImGui::Button("Load position (F7)")) c.load_position_request = true;
+    ImGui::EndDisabled();
+}
+
 void draw_menu_bar() {
     if (!ImGui::BeginMainMenuBar()) return;
     if (ImGui::BeginMenu("Ocean Crab")) {
@@ -154,6 +174,10 @@ void draw_menu_bar() {
     }
     if (ImGui::BeginMenu("Graphics")) {
         graphics_menu();
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Cheats")) {
+        cheats_menu();
         ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
@@ -196,8 +220,24 @@ void menu_shutdown() {
     g_ready = false;
 }
 
+CheatState &cheats() {
+    static CheatState state;
+    return state;
+}
+
 void menu_handle_event(const SDL_Event &event) {
     if (!g_ready) return;
+    // Cheat hotkeys (keys the game does not use).
+    if ((event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) && !ImGui::GetIO().WantCaptureKeyboard) {
+        const bool down = event.type == SDL_KEYDOWN;
+        switch (event.key.keysym.scancode) {
+        case SDL_SCANCODE_J: cheats().moon_jump_held = down; break;
+        case SDL_SCANCODE_TAB: cheats().turbo_held = down; break;
+        case SDL_SCANCODE_F5: if (down && event.key.repeat == 0) cheats().save_position_request = true; break;
+        case SDL_SCANCODE_F7: if (down && event.key.repeat == 0) cheats().load_position_request = true; break;
+        default: break;
+        }
+    }
     if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F1 && event.key.repeat == 0) {
         g_open = !g_open;
         return;

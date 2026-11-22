@@ -66,6 +66,8 @@ Press **F1** in game. Settings are saved to `SpongebobNative.ini` next to the ex
 
 The menu also shows which GPU is in use (a discrete GPU is preferred on hybrid laptops).
 
+**Cheats** (F1 → Cheats), handy for testing: infinite health, infinite lives, moon jump (hold **J**), turbo (hold **Tab** to run unthrottled), and save / load position (**F5** / **F7**).
+
 ## How it works
 
 ```mermaid
