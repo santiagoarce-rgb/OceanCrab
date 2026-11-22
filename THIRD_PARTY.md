@@ -19,6 +19,7 @@ These are linked or invoked at build time and are not vendored in this repositor
 | [SDL2](https://www.libsdl.org/) | zlib | Window, input, audio device |
 | [Vulkan loader / headers](https://www.vulkan.org/) | Apache-2.0 | Graphics API |
 | [glslang](https://github.com/KhronosGroup/glslang) | BSD-3-Clause and others | Compiles the GE shaders to SPIR-V at build time |
+| [Dear ImGui](https://github.com/ocornut/imgui) | MIT | F1 enhancements menu (fetched at configure time, pinned to v1.91.9b) |
 
 ## Reference material
 
