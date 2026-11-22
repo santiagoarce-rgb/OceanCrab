@@ -1907,6 +1907,48 @@ void player_log_tick(psprecomp::Runtime &rt) {
     std::snprintf(line, sizeof line, "[player]   projection m00=%.3f m11=%.3f m22=%.4f m23=%.4f m32=%.4f m33=%.4f",
                   p[0], p[5], p[10], p[11], p[14], p[15]);
     std::cerr << line << "\n";
+    // PSPRECOMP_POKE_FLOATS=<addr,addr,...>:<factor>: experiment, multiply those
+    // guest floats once (to test candidate engine cull/far distances).
+    static bool poked = false;
+    if (const char *poke = std::getenv("PSPRECOMP_POKE_FLOATS"); poke != nullptr && !poked) {
+        poked = true;
+        const char *colon = std::strchr(poke, ':');
+        const float factor = colon != nullptr ? std::strtof(colon + 1, nullptr) : 8.0f;
+        for (const char *q = poke; q != nullptr && *q != '\0' && *q != ':';) {
+            char *end = nullptr;
+            const std::uint32_t address = static_cast<std::uint32_t>(std::strtoul(q, &end, 0));
+            if (end == q) break;
+            const std::uint32_t bits = rt.memory().load32(address);
+            float v;
+            std::memcpy(&v, &bits, 4u);
+            v *= factor;
+            std::uint32_t out;
+            std::memcpy(&out, &v, 4u);
+            rt.memory().store32(address, out);
+            std::cerr << "[poke] " << psprecomp::hex32(address) << " -> " << v << "\n";
+            q = (*end == ',') ? end + 1 : end;
+        }
+    }
+    // PSPRECOMP_FIND_FAR=1: once, find guest floats equal to the current near/far
+    // planes (where the engine keeps its camera planes / cull distances).
+    static const bool find_far = std::getenv("PSPRECOMP_FIND_FAR") != nullptr;
+    static bool searched = false;
+    if (find_far && !searched && p[11] != 0.0f) {
+        searched = true;
+        const float near_plane = p[14] / (p[10] - 1.0f), far_plane = p[14] / (p[10] + 1.0f);
+        std::cerr << "[find-far] near=" << near_plane << " far=" << far_plane << "\n";
+        const std::uint8_t *ram = rt.memory().raw_pointer(0x08804000u, 0x0A000000u - 0x08804000u);
+        int hits = 0;
+        for (std::uint32_t off = 0u; ram != nullptr && off + 4u <= 0x0A000000u - 0x08804000u && hits < 40; off += 4u) {
+            float v;
+            std::memcpy(&v, ram + off, 4u);
+            if (std::fabs(v - far_plane) < far_plane * 0.02f || std::fabs(v - far_plane * far_plane) < far_plane * far_plane * 0.02f) {
+                ++hits;
+                std::cerr << "[find-far] " << (std::fabs(v - far_plane) < far_plane * 0.02f ? "far " : "far^2 ")
+                          << psprecomp::hex32(0x08804000u + off) << " = " << v << "\n";
+            }
+        }
+    }
 }
 
 // PSPRECOMP_PLAYER_RECORD=<file>: append one record per presented frame while a

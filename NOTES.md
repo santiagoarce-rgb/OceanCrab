@@ -655,8 +655,18 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   de la cueva que antes dejaban ver el cielo), pero en color de niebla plano: la
   niebla llega al 100 % justo en el far original. Se escala también la niebla
   (fin × N, pendiente / N; comandos GE 0xCD/0xCE) en una copia de los comandos.
-- Pendiente: confirmar con la niebla escalada; si faltan objetos lejanos, el motor
-  descarta en CPU (PVS / far de `CWCamera`).
+- Usuario: con niebla escalada los niveles "cambian todo" (mucho detalle oculto en
+  1×). Pide 32× (hecho, menú hasta 32×) y que aparezcan también objetos/enemigos:
+  el escenario se extiende pero las entidades se descartan en CPU.
+- Pistas para el descarte de entidades: propiedad `CamDistance` (string
+  `0x08A6ED1C`), leída/serializada en `CWEntity::vfunc_18` (`0x08956C3C`); el float
+  serializado NO está en `entidad+0x38` (valores basura en grabaciones).
+  `spawnrange`/`spawnradius` en `CWSpawnPoint::vfunc_04` (`0x0896BC48`).
+- Herramientas: `PSPRECOMP_FIND_FAR=1` (busca en RAM floats ≈ far actual) y
+  `PSPRECOMP_POKE_FLOATS=<addr,...>:<factor>` (multiplica floats una vez). Los
+  globales `.data` `0x08A7D514` y `0x08A7D524` valen 85 (= far del hub) pero NO son
+  el far de la proyección; candidatos a distancia de descarte, por probar en el
+  nivel 1.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
