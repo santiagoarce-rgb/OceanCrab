@@ -2117,6 +2117,31 @@ void puppet_test_tick(psprecomp::Runtime &rt) {
                   << as_float(m[13]) << ", " << as_float(m[14]) << ")\n";
 }
 
+// Draw distance, part 2: the engine stops drawing entities (objects, enemies)
+// beyond two globals that hold the base view distance (85 in the hub). Found
+// with PSPRECOMP_FIND_FAR / PSPRECOMP_POKE_FLOATS and confirmed in level 1 by
+// the player. Keep them at base * Rendering.DrawDistance; if the game writes a
+// new value (e.g. on a level load), take it as the new base.
+void entity_draw_distance_tick(psprecomp::Runtime &rt) {
+    static constexpr std::array<std::uint32_t, 2> kEntityCullDistance = {0x08A7D514u, 0x08A7D524u};
+    static std::array<float, 2> base{};
+    static std::array<std::uint32_t, 2> written{};
+    static std::array<bool, 2> known{};
+    const float scale = static_cast<float>(spongebob_render_configuration().rendering.draw_distance_scale);
+    for (std::size_t i = 0u; i < kEntityCullDistance.size(); ++i) {
+        const std::uint32_t current = rt.memory().load32(kEntityCullDistance[i]);
+        if (!known[i] || current != written[i]) {
+            std::memcpy(&base[i], &current, sizeof(float));
+            known[i] = true;
+        }
+        const float wanted = base[i] * scale;
+        std::uint32_t bits;
+        std::memcpy(&bits, &wanted, sizeof bits);
+        if (bits != current) rt.memory().store32(kEntityCullDistance[i], bits);
+        written[i] = bits;
+    }
+}
+
 void object_dump_tick(psprecomp::Runtime &rt) {
     static const struct Config {
         std::uint32_t vtable{}, size{}, every{};
@@ -2164,6 +2189,7 @@ void register_display_hle(psprecomp::Runtime &rt) {
             return;
         }
         object_dump_tick(rt);
+        entity_draw_distance_tick(rt);
         player_log_tick(rt);
         player_record_tick(rt);
         object_record_tick(rt);

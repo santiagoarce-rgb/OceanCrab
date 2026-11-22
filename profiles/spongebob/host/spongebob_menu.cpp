@@ -105,8 +105,8 @@ void graphics_menu() {
 
     ImGui::SetNextItemWidth(200.0f);
     if (value_combo("Draw distance", rendering.draw_distance_scale,
-                    std::array<std::uint32_t, 6>{1u, 2u, 4u, 8u, 16u, 32u},
-                    std::array<const char *, 6>{"1x  (original)", "2x", "4x", "8x", "16x", "32x"}))
+                    std::array<std::uint32_t, 7>{1u, 2u, 4u, 8u, 16u, 32u, 64u},
+                    std::array<const char *, 7>{"1x  (original)", "2x", "4x", "8x", "16x", "32x", "64x"}))
         save_spongebob_setting("Rendering", "DrawDistance", std::to_string(rendering.draw_distance_scale));
     ImGui::SameLine();
     ImGui::TextDisabled("(live)");

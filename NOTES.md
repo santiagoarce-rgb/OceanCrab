@@ -667,6 +667,10 @@ Reconstruido a partir de los commits; esas sesiones no se anotaron en su momento
   globales `.data` `0x08A7D514` y `0x08A7D524` valen 85 (= far del hub) pero NO son
   el far de la proyección; candidatos a distancia de descarte, por probar en el
   nivel 1.
+- ✅ Confirmado por el usuario (nivel 1, `POKE_FLOATS` ×8): `0x08A7D514` y
+  `0x08A7D524` son la distancia de descarte de entidades (objetos/enemigos).
+  `entity_draw_distance_tick` las mantiene en base × DrawDistance (re-toma la base
+  si el juego escribe otro valor). Menú hasta 64×.
 
 ## Próxima sesión
 1. Peces del hub (texturas raras), si vale la pena.
